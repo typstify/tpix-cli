@@ -18,7 +18,7 @@ const (
 
 func DeviceLogin() (*TokenResponse, error) {
 	// Initiate device flow
-	resp, err := makeRequest("POST", "/auth/device/code", nil, "")
+	resp, err := client.MakeRequest("POST", "/auth/device/code", nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func pollForToken(deviceCode string, hostname string) (*TokenResponse, bool, err
 		"hostname":    hostname,
 	})
 
-	resp, err := makeRequest("POST", "/auth/device/token", bytes.NewBuffer(reqBody), "application/json")
+	resp, err := client.MakeRequest("POST", "/auth/device/token", bytes.NewBuffer(reqBody), "application/json")
 	if err != nil {
 		return nil, false, err
 	}

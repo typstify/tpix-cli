@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/typstify/tpix-cli/config"
 	"github.com/spf13/cobra"
+	"github.com/typstify/tpix-cli/api"
+	"github.com/typstify/tpix-cli/config"
 )
 
 var (
@@ -15,6 +16,8 @@ var (
 func main() {
 	// Load config on startup
 	config.Load()
+
+	api.Init(config.CliCredentialProvider{})
 
 	//rootCmd.PersistentFlags().StringVar(&tpixServer, "server", tpixServer, "TPIX server URL")
 

@@ -10,9 +10,16 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/typstify/tpix-cli/config"
 	"github.com/typstify/tpix-cli/utils"
 )
+
+var (
+	client *HttpClient
+)
+
+func Init(provider CredentialsProvider) {
+	client = NewHttpClient(provider)
+}
 
 // SearchPackages fetches packages matching a query from the TPIX server.
 func SearchPackages(query, namespace string, limit int) (*SearchResponse, error) {
@@ -24,7 +31,7 @@ func SearchPackages(query, namespace string, limit int) (*SearchResponse, error)
 		url += fmt.Sprintf("&limit=%d", limit)
 	}
 
-	resp, err := makeRequest("GET", url, nil, "")
+	resp, err := client.MakeRequest("GET", url, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to search packages: %w", err)
 	}
@@ -45,10 +52,10 @@ func SearchPackages(query, namespace string, limit int) (*SearchResponse, error)
 
 // DownloadPackage downloads a package, extracts it to the cache directory,
 // and optionally saves the archive to output path.
-func DownloadPackage(namespace, name, version string) error {
+func DownloadPackage(namespace, name, version string, cacheDir string) error {
 	url := fmt.Sprintf("/api/v1/download/%s/%s/%s", namespace, name, version)
 
-	resp, err := makeRequest("GET", url, nil, "")
+	resp, err := client.MakeRequest("GET", url, nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to download package: %w", err)
 	}
@@ -73,15 +80,8 @@ func DownloadPackage(namespace, name, version string) error {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 
-	// Extract to cache directory
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	cacheDir := cfg.TypstCachePkgPath
 	if cacheDir == "" {
-		return fmt.Errorf("typst cache directory not configured")
+		return fmt.Errorf("typst cache directory not set")
 	}
 
 	extractDir := filepath.Join(cacheDir, namespace, name, version)
@@ -95,7 +95,7 @@ func DownloadPackage(namespace, name, version string) error {
 // FetchPackage fetches package details from the TPIX server.
 func FetchPackage(namespace, name string) (*PackageResponse, error) {
 	url := fmt.Sprintf("/api/v1/packages/%s/%s", namespace, name)
-	resp, err := makeRequest("GET", url, nil, "")
+	resp, err := client.MakeRequest("GET", url, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch package: %w", err)
 	}
@@ -123,7 +123,7 @@ func FetchPackage(namespace, name string) (*PackageResponse, error) {
 // FetchPackageVersions fetches all versions for a package.
 func fetchPackageVersions(namespace, name string) ([]PackageVersionInfo, error) {
 	url := fmt.Sprintf("/api/v1/packages/%s/%s/versions", namespace, name)
-	resp, err := makeRequest("GET", url, nil, "")
+	resp, err := client.MakeRequest("GET", url, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch versions: %w", err)
 	}
@@ -145,7 +145,7 @@ func fetchPackageVersions(namespace, name string) ([]PackageVersionInfo, error) 
 // FetchDependencies fetches the dependencies for a specific package version.
 func FetchDependencies(namespace, name, version string) ([]DependencyInfo, error) {
 	url := fmt.Sprintf("/api/v1/packages/%s/%s/%s/dependencies", namespace, name, version)
-	resp, err := makeRequest("GET", url, nil, "")
+	resp, err := client.MakeRequest("GET", url, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch dependencies: %w", err)
 	}
@@ -200,7 +200,7 @@ func UploadPackage(packagePath, namespace string) (*UploadResponse, error) {
 
 	// Create request
 	url := "/api/v1/packages/upload"
-	resp, err := makeRequest("POST", url, &buf, writer.FormDataContentType())
+	resp, err := client.MakeRequest("POST", url, &buf, writer.FormDataContentType())
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload package: %w", err)
 	}

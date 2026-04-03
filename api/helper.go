@@ -16,13 +16,26 @@ const (
 	TpixClientUserAgent = "tpix-client/v1.0.0"
 )
 
-// refreshMu prevents concurrent refresh attempts
-var refreshMu sync.Mutex
+type CredentialsProvider interface {
+	Load() (config.Credentials, error)
+	Save(cred config.Credentials) error
+}
 
-// makeRequest creates an HTTP request with Bearer token.
+type HttpClient struct {
+	cred CredentialsProvider
+
+	// refreshMu prevents concurrent refresh attempts
+	refreshMu sync.Mutex
+}
+
+func NewHttpClient(provider CredentialsProvider) *HttpClient {
+	return &HttpClient{cred: provider}
+}
+
+// MakeRequest creates an HTTP request with Bearer token.
 // On 401 responses, it transparently attempts to refresh the access token
 // and retries the request once.
-func makeRequest(method, url string, body io.Reader, contentType string) (*http.Response, error) {
+func (c *HttpClient) MakeRequest(method, url string, body io.Reader, contentType string) (*http.Response, error) {
 	// Buffer the body so we can replay it on retry
 	var bodyBytes []byte
 	if body != nil {
@@ -33,27 +46,27 @@ func makeRequest(method, url string, body io.Reader, contentType string) (*http.
 		}
 	}
 
-	cfg, err := config.Load()
+	cred, err := c.cred.Load()
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := doRequest(method, url, bodyBytes, contentType, cfg.AccessToken)
+	resp, err := c.doRequest(method, url, bodyBytes, contentType, cred.AccessToken)
 	if err != nil {
 		return nil, err
 	}
 
 	// If 401 and we have a refresh token, try to refresh and retry
-	if resp.StatusCode == http.StatusUnauthorized && cfg.RefreshToken != "" {
+	if resp.StatusCode == http.StatusUnauthorized && cred.RefreshToken != "" {
 		resp.Body.Close()
-		if refreshErr := refreshAccessToken(cfg); refreshErr == nil {
+		if refreshErr := c.refreshAccessToken(cred); refreshErr == nil {
 			// reload config
 			cfg, err := config.Load()
 			if err != nil {
 				return nil, err
 			}
 
-			return doRequest(method, url, bodyBytes, contentType, cfg.AccessToken)
+			return c.doRequest(method, url, bodyBytes, contentType, cfg.AccessToken)
 		}
 	}
 
@@ -61,7 +74,7 @@ func makeRequest(method, url string, body io.Reader, contentType string) (*http.
 }
 
 // doRequest executes a single HTTP request without retry logic.
-func doRequest(method, url string, bodyBytes []byte, contentType string, accessToken string) (*http.Response, error) {
+func (c *HttpClient) doRequest(method, url string, bodyBytes []byte, contentType string, accessToken string) (*http.Response, error) {
 	apiUrl := fmt.Sprintf("%s%s", TpixServer, url)
 
 	var bodyReader io.Reader
@@ -88,15 +101,15 @@ func doRequest(method, url string, bodyBytes []byte, contentType string, accessT
 
 // refreshAccessToken uses the stored refresh token to obtain a new access token.
 // On success, it updates the config with both new tokens and persists them.
-func refreshAccessToken(cfg config.Config) error {
-	refreshMu.Lock()
-	defer refreshMu.Unlock()
+func (c *HttpClient) refreshAccessToken(cred config.Credentials) error {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
 
 	reqBody, _ := json.Marshal(map[string]string{
-		"refresh_token": cfg.RefreshToken,
+		"refresh_token": cred.RefreshToken,
 	})
 
-	resp, err := doRequest("POST", "/auth/token/refresh", reqBody, "application/json", "")
+	resp, err := c.doRequest("POST", "/auth/token/refresh", reqBody, "application/json", "")
 	if err != nil {
 		return err
 	}
@@ -104,8 +117,8 @@ func refreshAccessToken(cfg config.Config) error {
 
 	if resp.StatusCode != http.StatusOK {
 		// Refresh failed — clear refresh token so we don't keep retrying
-		cfg.RefreshToken = ""
-		config.Save(cfg)
+		cred.RefreshToken = ""
+		c.cred.Save(cred)
 		return fmt.Errorf("token refresh failed with status %d", resp.StatusCode)
 	}
 
@@ -114,9 +127,10 @@ func refreshAccessToken(cfg config.Config) error {
 		return err
 	}
 
-	cfg.AccessToken = tokenResp.AccessToken
+	cred.AccessToken = tokenResp.AccessToken
 	if tokenResp.RefreshToken != "" {
-		cfg.RefreshToken = tokenResp.RefreshToken
+		cred.RefreshToken = tokenResp.RefreshToken
 	}
-	return config.Save(cfg)
+
+	return c.cred.Save(cred)
 }

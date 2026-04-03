@@ -13,9 +13,13 @@ const (
 	cachePathEnv   = "TYPST_PACKAGE_CACHE_PATH"
 )
 
+type Credentials struct {
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+}
+
 type Config struct {
-	AccessToken       string `json:"accessToken"`
-	RefreshToken      string `json:"refreshToken,omitempty"`
+	Credentials
 	TypstCachePkgPath string `json:"typstCachePkgPath"`
 }
 
@@ -140,4 +144,26 @@ func defaultCacheDir() string {
 	}
 
 	return cacheDir
+}
+
+type CliCredentialProvider struct{}
+
+func (c CliCredentialProvider) Load() (Credentials, error) {
+	cfg, err := Load()
+	if err != nil {
+		return Credentials{}, err
+	}
+
+	return cfg.Credentials, err
+}
+
+func (c CliCredentialProvider) Save(cred Credentials) error {
+	cfg, err := Load()
+	if err != nil {
+		return err
+	}
+
+	cfg.Credentials = cred
+
+	return Save(cfg)
 }

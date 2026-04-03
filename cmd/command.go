@@ -4,34 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/typstify/tpix-cli/api"
-	"github.com/typstify/tpix-cli/bundler"
+	cli "github.com/typstify/tpix-cli"
 	"github.com/typstify/tpix-cli/config"
-	"github.com/typstify/tpix-cli/deps"
 	"github.com/typstify/tpix-cli/version"
 )
 
-// parsePkgSpec parses a package spec in the format @namespace/name:version
-// Returns namespace, name, and version (version may be empty)
-func parsePkgSpec(pkgSpec string) (namespace, name, version string) {
-	// Remove leading @ and split on /
-	s := strings.TrimPrefix(pkgSpec, "@")
-	parts := strings.SplitN(s, "/", 2)
-	if len(parts) < 2 {
-		return
-	}
-	namespace = parts[0]
-
-	// Split name and version on :
-	nameVer := strings.SplitN(parts[1], ":", 2)
-	name = nameVer[0]
-	if len(nameVer) > 1 {
-		version = nameVer[1]
-	}
-	return
+var cmdReporter = func(msg string) {
+	fmt.Print(msg)
 }
 
 func loginCmd() *cobra.Command {
@@ -41,7 +22,7 @@ func loginCmd() *cobra.Command {
 		Long:  "Login the tpix server. User is required to login for all other operations",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tokenResp, err := api.DeviceLogin()
+			tokenResp, err := cli.Login()
 			if err != nil {
 				fmt.Printf("Login failed: %v\n", err)
 				return err
@@ -76,7 +57,7 @@ func searchPkgCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := args[0]
 
-			result, err := api.SearchPackages(query, namespace, limit)
+			result, err := cli.SearchPackages(namespace, query, limit)
 			if err != nil {
 				fmt.Printf("failed to search packages: %v", err)
 				return nil
@@ -97,52 +78,6 @@ func searchPkgCmd() *cobra.Command {
 	return cmd
 }
 
-// isPackageCached checks if a package version is already in the local cache.
-func isPackageCached(cacheDir, namespace, name, version string) bool {
-	pkgDir := filepath.Join(cacheDir, namespace, name, version)
-	info, err := os.Stat(pkgDir)
-	return err == nil && info.IsDir()
-}
-
-// fetchWithDeps downloads a package and its transitive dependencies.
-// visited tracks already-processed packages to prevent infinite loops.
-func fetchWithDeps(namespace, name, version, cacheDir string, visited map[string]bool, noDeps bool) error {
-	key := fmt.Sprintf("@%s/%s:%s", namespace, name, version)
-	if visited[key] {
-		return nil
-	}
-	visited[key] = true
-
-	if isPackageCached(cacheDir, namespace, name, version) {
-		fmt.Printf("  Already cached: %s\n", key)
-		// Do not return early, check if dependencies are satisfied.
-	} else {
-		fmt.Printf("  Downloading %s...\n", key)
-		if err := api.DownloadPackage(namespace, name, version); err != nil {
-			return fmt.Errorf("failed to download %s: %w", key, err)
-		}
-	}
-
-	if noDeps {
-		return nil
-	}
-
-	// Fetch and resolve transitive dependencies
-	depInfos, err := api.FetchDependencies(namespace, name, version)
-	if err != nil {
-		// Non-fatal: the server may not have dependency data for older packages
-		return nil
-	}
-
-	for _, dep := range depInfos {
-		if err := fetchWithDeps(dep.Namespace, dep.Name, dep.Version, cacheDir, visited, false); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // getPkgCmd download Typst packages from TPIX server.
 func getPkgCmd() *cobra.Command {
 	var noDeps bool
@@ -154,21 +89,6 @@ func getPkgCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgSpec := args[0]
 
-			// Parse namespace/name:version
-			namespace, name, version := parsePkgSpec(pkgSpec)
-
-			if version == "" {
-				// Get latest version first
-				pkg, err := api.FetchPackage(namespace, name)
-				if err != nil {
-					return err
-				}
-				if len(pkg.Versions) == 0 {
-					return fmt.Errorf("no versions available for package")
-				}
-				version = pkg.Versions[len(pkg.Versions)-1].Version
-			}
-
 			cfg, err := config.Load()
 			if err != nil {
 				return err
@@ -178,14 +98,8 @@ func getPkgCmd() *cobra.Command {
 				return fmt.Errorf("typst cache directory not configured")
 			}
 
-			fmt.Printf("Resolving @%s/%s:%s...\n", namespace, name, version)
-			visited := make(map[string]bool)
-			if err := fetchWithDeps(namespace, name, version, cacheDir, visited, noDeps); err != nil {
-				return err
-			}
-
-			fmt.Printf("Done. %d package(s) resolved.\n", len(visited))
-			return nil
+			_, err = cli.DownloadPackage(pkgSpec, cacheDir, noDeps, cmdReporter)
+			return err
 		},
 	}
 
@@ -223,40 +137,7 @@ Use --dry-run to see what would be fetched without downloading anything.`,
 				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
-			fmt.Printf("Scanning %s for package imports...\n", cwd)
-			discovered, err := deps.ExtractFromDirectory(cwd)
-			if err != nil {
-				return fmt.Errorf("failed to scan for imports: %w", err)
-			}
-
-			if len(discovered) == 0 {
-				fmt.Println("No package imports found.")
-				return nil
-			}
-
-			fmt.Printf("Found %d direct dependency(ies).\n", len(discovered))
-
-			if dryRun {
-				for _, dep := range discovered {
-					cached := isPackageCached(cacheDir, dep.Namespace, dep.Name, dep.Version)
-					status := "missing"
-					if cached {
-						status = "cached"
-					}
-					fmt.Printf("  %s [%s]\n", dep.Key(), status)
-				}
-				return nil
-			}
-
-			visited := make(map[string]bool)
-			for _, dep := range discovered {
-				if err := fetchWithDeps(dep.Namespace, dep.Name, dep.Version, cacheDir, visited, false); err != nil {
-					return err
-				}
-			}
-
-			fmt.Printf("Done. %d package(s) resolved.\n", len(visited))
-			return nil
+			return cli.DownloadProjectDependencies(cwd, cacheDir, dryRun, cmdReporter)
 		},
 	}
 
@@ -337,7 +218,7 @@ func removeCachedCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgSpec := args[0]
-			namespace, name, version := parsePkgSpec(pkgSpec)
+			namespace, name, version := cli.ParsePkgSpec(pkgSpec)
 
 			if namespace == "" || name == "" || version == "" {
 				return fmt.Errorf("invalid package spec: use format @namespace/name:version")
@@ -388,15 +269,12 @@ func queryPkgCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgSpec := args[0]
 
-			// Parse namespace/name
-			namespace, name, _ := parsePkgSpec(pkgSpec)
-
-			pkg, err := api.FetchPackage(namespace, name)
+			pkg, err := cli.QueryPackage(pkgSpec)
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("Package: @%s/%s\n\n", namespace, name)
+			fmt.Printf("Package: @%s/%s\n\n", pkg.Namespace, pkg.Name)
 			fmt.Printf("Description: %s\n", pkg.Description)
 			fmt.Printf("Website: %s\n", pkg.HomepageURL)
 			fmt.Printf("Repository: %s\n", pkg.RepositoryURL)
@@ -432,34 +310,12 @@ Files and directories can be excluded using the --exclude flag or the exclude fi
 		RunE: func(cmd *cobra.Command, args []string) error {
 			srcDir := args[0]
 
-			// Check if directory exists
-			info, err := os.Stat(srcDir)
+			finalPath, err := cli.BundlePackage(srcDir, output, exclude)
 			if err != nil {
-				return fmt.Errorf("failed to access directory: %w", err)
-			}
-			if !info.IsDir() {
-				return fmt.Errorf("%s is not a directory", srcDir)
+				return err
 			}
 
-			// Check for typst.toml
-			manifestPath := filepath.Join(srcDir, "typst.toml")
-			if _, err := os.Stat(manifestPath); err != nil {
-				return fmt.Errorf("typst.toml not found in %s - a valid manifest is required", srcDir)
-			}
-
-			// Determine output path
-			if output == "" {
-				// Use directory name with .tar.gz extension
-				output = filepath.Base(srcDir) + ".tar.gz"
-			}
-
-			// Create package
-			creator := bundler.NewPackageCreator(exclude)
-			if err := creator.CreatePackage(srcDir, output); err != nil {
-				return fmt.Errorf("failed to create package: %w", err)
-			}
-
-			fmt.Printf("Package created: %s\n", output)
+			fmt.Printf("Package created: %s\n", &finalPath)
 			return nil
 		},
 	}
@@ -482,42 +338,7 @@ The package must be a valid Typst package archive created with the bundle comman
 			packagePath := args[0]
 			namespace := args[1]
 
-			// Check if file exists
-			info, err := os.Stat(packagePath)
-			if err != nil {
-				return fmt.Errorf("failed to access package: %w", err)
-			}
-			if info.IsDir() {
-				return fmt.Errorf("%s is a directory, not a package file", packagePath)
-			}
-
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-
-			// Check if user is logged in
-			if cfg.AccessToken == "" {
-				return fmt.Errorf("not logged in. Please run 'tpix login' first")
-			}
-
-			fmt.Printf("Uploading %s to namespace %s...\n", packagePath, namespace)
-
-			resp, err := api.UploadPackage(packagePath, namespace)
-			if err != nil {
-				return fmt.Errorf("upload failed: %w", err)
-			}
-
-			if resp.SHA256 != "" {
-				fmt.Printf("Successfully uploaded package: @%s/%s:%s\n", namespace, resp.Package, resp.Version)
-			} else {
-				fmt.Printf("Upload failed, report: \n")
-				for _, r := range resp.ValidateReport {
-					fmt.Printf("\t%s\n", r)
-				}
-			}
-
-			return nil
+			return cli.PushPackage(packagePath, namespace, cmdReporter)
 		},
 	}
 
