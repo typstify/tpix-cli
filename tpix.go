@@ -7,10 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/typstify/tpix-cli/api"
 	"github.com/typstify/tpix-cli/bundler"
 	"github.com/typstify/tpix-cli/deps"
+	"github.com/typstify/tpix-cli/utils"
+)
+
+const (
+	pollInterval = 5 * time.Second
 )
 
 type ReportFunc func(message string)
@@ -90,8 +96,44 @@ func fetchWithDeps(namespace, name, version, cacheDir string, visited map[string
 	return nil
 }
 
-func Login() (*api.TokenResponse, error) {
-	return api.DeviceLogin()
+func StartLogin() (*api.DeviceCodeResponse, error) {
+	deviceResp, err := api.StartDeviceLogin()
+	if err != nil {
+		return nil, err
+	}
+
+	verifyUrl := deviceResp.VerificationURI + "?user_code=" + deviceResp.UserCode
+	// open the url for user
+	utils.OpenURL(verifyUrl)
+
+	return deviceResp, nil
+}
+
+func PollLoginResult(deviceCode string, expiresIn int, reporter ReportFunc) (*api.TokenResponse, error) {
+	timeout := time.After(time.Duration(expiresIn) * time.Second)
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	hostname, _ := os.Hostname()
+
+	for {
+		select {
+		case <-timeout:
+			return nil, fmt.Errorf("device code expired, please try again.")
+		case <-ticker.C:
+			tokenResp, pending, err := api.PollForToken(deviceCode, hostname)
+			if err != nil {
+				return nil, err
+			}
+			if !pending {
+				return tokenResp, nil
+			}
+
+			if reporter != nil {
+				fmt.Print(".")
+			}
+		}
+	}
 }
 
 // SearchPackages searches Typst packages from TPIX server.

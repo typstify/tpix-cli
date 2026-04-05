@@ -22,7 +22,20 @@ func loginCmd() *cobra.Command {
 		Long:  "Login the tpix server. User is required to login for all other operations",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tokenResp, err := cli.Login()
+			deviceResp, err := cli.StartLogin()
+			if err != nil {
+				fmt.Printf("Login failed: %v\n", err)
+				return err
+			}
+
+			// Display instructions to user
+			cmdReporter("=== Device Authorization ===\n")
+			cmdReporter(fmt.Sprintf("Visit: %s\n", deviceResp.VerificationURI))
+			cmdReporter(fmt.Sprintf("Enter code: %s\n", deviceResp.UserCode))
+			cmdReporter(fmt.Sprintf("Code expires in %d seconds\n", deviceResp.ExpiresIn))
+			cmdReporter("If the browser does not open, please open the above URL manually.")
+
+			tokenResp, err := cli.PollLoginResult(deviceResp.DeviceCode, deviceResp.ExpiresIn, cmdReporter)
 			if err != nil {
 				fmt.Printf("Login failed: %v\n", err)
 				return err
@@ -36,7 +49,7 @@ func loginCmd() *cobra.Command {
 			cfg.AccessToken = tokenResp.AccessToken
 			cfg.RefreshToken = tokenResp.RefreshToken
 			config.Save(cfg)
-			fmt.Printf("\n\nSuccess! Access token saved\n")
+			cmdReporter("\n\nSuccess! Access token saved\n")
 
 			return nil
 		},
