@@ -169,7 +169,26 @@ For more information on how to create a package, please refer to docs in https:/
 tpix push my-package.tar.gz mynamespace
 ```
 
-Requires login first.
+### Zotero Export
+
+```bash
+# List accessible Zotero libraries
+tpix zotero list
+
+# Create and download an export (interactive mode)
+tpix zotero export
+
+# Export to a specific file
+tpix zotero export -o references.bib
+
+# Export with specific format
+tpix zotero export --format bibtex -o references.bib
+
+# Export from specific library
+tpix zotero export --library 12345 -o references.bib
+```
+
+`tpix zotero export` creates a temporary export, downloads the citations, and automatically cleans up. Use `--format` to specify output format (default: biblatex).
 
 ### Version & Updates
 

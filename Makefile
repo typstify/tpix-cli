@@ -23,7 +23,7 @@ all: build
 
 ## build: Build the binary for the current architecture
 build:
-	go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) .
+	go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) ./cmd
 
 ## clean: Remove build artifacts
 clean:
