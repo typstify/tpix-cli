@@ -44,7 +44,7 @@ release: clean
 		[ $$os = "windows" ] && output_name+=".exe"; \
 		\
 		echo "Building for $$os/$$arch..."; \
-		GOOS=$$os GOARCH=$$arch go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$$output_name .; \
+		GOOS=$$os GOARCH=$$arch go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$$output_name ./cmd; \
 		\
 		tar_name="tpix-cli-$$os-$$arch.tar.gz"; \
 		cp LICENSE $(DIST_DIR)/; \
