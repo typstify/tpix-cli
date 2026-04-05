@@ -15,6 +15,9 @@ import (
 
 type ReportFunc func(message string)
 
+// ZoteroLibrary represents a Zotero library.
+type ZoteroLibrary = api.ZoteroLibrary
+
 // Helper functions
 
 // ParsePkgSpec parses a package spec in the format @namespace/name:version
