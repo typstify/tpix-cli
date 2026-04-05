@@ -1,10 +1,11 @@
 # TPIX CLI
 
-A command-line client for managing Typst packages on the [TPIX](https://tpix.typstify.com) server(Coming soon).
+A command-line client for managing Typst packages on the [TPIX](https://tpix.typstify.com) server. 
+For more information about TPIX and TPIX CLI, please visit [TPIX](https://tpix.typstify.com/docs).
 
 ## Installation
 
-You can user the install script to download and install the latest stable version if you are using Linux or MacOS:
+Use the install script to download and install the latest stable version if you are using Linux or MacOS:
 
 ```bash
 curl -fsSL https://tpix.typstify.com/install.sh | bash
