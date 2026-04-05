@@ -510,3 +510,224 @@ If neither is set, the default path is used:
 
 	return cmd
 }
+
+// zoteroCmd is the parent command for zotero operations.
+func zoteroCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "zotero",
+		Short: "Zotero integration commands",
+		Long:  "Commands for managing Zotero library exports",
+	}
+
+	cmd.AddCommand(zoteroListCmd())
+	cmd.AddCommand(zoteroExportCmd())
+	cmd.AddCommand(zoteroDeleteCmd())
+
+	return cmd
+}
+
+// zoteroListCmd lists accessible Zotero libraries.
+func zoteroListCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List accessible Zotero libraries",
+		Long:  "List Zotero libraries the user has access to",
+		Args:  cobra.ExactArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			libraries, err := cli.ListZoteroLibraries()
+			if err != nil {
+				return fmt.Errorf("failed to list libraries: %w", err)
+			}
+
+			if len(libraries) == 0 {
+				fmt.Println("No accessible Zotero libraries.")
+				return nil
+			}
+
+			fmt.Printf("Accessible Zotero libraries:\n\n")
+			for i, lib := range libraries {
+				scope := lib.Namespace
+				if scope == "" {
+					scope = "(personal)"
+				} else {
+					scope = "@" + scope
+				}
+				fmt.Printf("%d. %s (%s)\n", i+1, scope, lib.Scope)
+				fmt.Printf("   Library: %s (ID: %d)\n", lib.Library.Name, lib.Library.ID)
+				if len(lib.Collections) > 0 {
+					fmt.Printf("   Collections:\n")
+					for _, col := range lib.Collections {
+						fmt.Printf("     - %s\n", col.Name)
+					}
+				}
+				fmt.Println()
+			}
+
+			return nil
+		},
+	}
+
+	return cmd
+}
+
+// zoteroExportCmd creates and downloads a Zotero export.
+func zoteroExportCmd() *cobra.Command {
+	var format string
+	var collection string
+	var output string
+	var libraryID int64
+	var libraryType string
+
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Create and download a Zotero export",
+		Long: `Create a Zotero export and download the results.
+Interactive mode: run without flags to select library and collection.`,
+		Args: cobra.ExactArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var targetLib *cli.ZoteroLibrary
+			var targetCol string
+
+			// If library ID provided, use it directly
+			if libraryID > 0 {
+				libraries, err := cli.ListZoteroLibraries()
+				if err != nil {
+					return fmt.Errorf("failed to list libraries: %w", err)
+				}
+
+				for _, lib := range libraries {
+					if lib.Library.ID == int(libraryID) {
+						targetLib = &lib
+						break
+					}
+				}
+				if targetLib == nil {
+					return fmt.Errorf("library not found: %d", libraryID)
+				}
+			} else {
+				// Interactive selection
+				libraries, err := cli.ListZoteroLibraries()
+				if err != nil {
+					return fmt.Errorf("failed to list libraries: %w", err)
+				}
+
+				if len(libraries) == 0 {
+					return fmt.Errorf("no accessible libraries")
+				}
+
+				fmt.Println("Select a library:")
+				for i, lib := range libraries {
+					scope := lib.Namespace
+					if scope == "" {
+						scope = "(personal)"
+					} else {
+						scope = "@" + scope
+					}
+					fmt.Printf("  %d. %s - %s\n", i+1, scope, lib.Library.Name)
+				}
+				fmt.Print("\nLibrary number: ")
+
+				var choice int
+				fmt.Scanf("%d", &choice)
+				if choice < 1 || choice > len(libraries) {
+					return fmt.Errorf("invalid selection")
+				}
+				targetLib = &libraries[choice-1]
+
+				// Select collection if available
+				if len(targetLib.Collections) > 0 {
+					fmt.Println("\nSelect a collection:")
+					fmt.Printf("  0. (all items)\n")
+					for i, col := range targetLib.Collections {
+						fmt.Printf("  %d. %s\n", i+1, col.Name)
+					}
+					fmt.Print("\nCollection number: ")
+
+					var colChoice int
+					fmt.Scanf("%d", &colChoice)
+					if colChoice < 0 || colChoice > len(targetLib.Collections) {
+						return fmt.Errorf("invalid selection")
+					}
+					if colChoice > 0 {
+						targetCol = targetLib.Collections[colChoice-1].Key
+					}
+				}
+			}
+
+			// Use collection flag if provided
+			if collection != "" {
+				targetCol = collection
+			}
+
+			// Use libraryType from selection
+			if libraryType == "" {
+				libraryType = targetLib.Scope
+			}
+
+			if format == "" {
+				format = "biblatex"
+			}
+
+			// Generate a name for the export
+			exportName := fmt.Sprintf("export-%s", targetLib.Library.Name)
+
+			exportID, err := cli.CreateZoteroExport(exportName, targetLib.NamespaceID, libraryType, int64(targetLib.Library.ID), targetCol, format, cmdReporter)
+			if err != nil {
+				return fmt.Errorf("failed to create export: %w", err)
+			}
+
+			// Fetch and write output
+			var writer interface{ Write([]byte) (int, error) }
+			if output != "" {
+				f, err := os.Create(output)
+				if err != nil {
+					return fmt.Errorf("failed to create output file: %w", err)
+				}
+				defer f.Close()
+				writer = f
+			} else {
+				writer = os.Stdout
+			}
+
+			if err := cli.FetchZoteroExport(exportID, writer); err != nil {
+				return fmt.Errorf("failed to fetch export: %w", err)
+			}
+
+			// Clean up the export target (treat as ephemeral in tpix-cli)
+			if err := cli.DeleteZoteroExport(exportID, nil); err != nil {
+				// Non-fatal, just warn
+				fmt.Fprintf(os.Stderr, "Warning: failed to clean up export: %v\n", err)
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&format, "format", "", "Export format (biblatex, bibtex)")
+	cmd.Flags().StringVar(&collection, "collection", "", "Collection key")
+	cmd.Flags().StringVar(&output, "output", "", "Output file")
+	cmd.Flags().Int64Var(&libraryID, "library", 0, "Library ID")
+	cmd.Flags().StringVar(&libraryType, "library-type", "", "Library type (users/groups)")
+
+	return cmd
+}
+
+// zoteroDeleteCmd deletes an existing export.
+func zoteroDeleteCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "delete <export-id>",
+		Short: "Delete a Zotero export",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			exportID := args[0]
+
+			if err := cli.DeleteZoteroExport(exportID, cmdReporter); err != nil {
+				return fmt.Errorf("failed to delete export: %w", err)
+			}
+
+			return nil
+		},
+	}
+
+	return cmd
+}

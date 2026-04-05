@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -273,6 +274,60 @@ func PushPackage(packagePath string, namespace string, reporter ReportFunc) erro
 				reporter(fmt.Sprintf("\t%s\n", r))
 			}
 		}
+	}
+
+	return nil
+}
+
+// ListZoteroLibraries returns the list of Zotero libraries accessible to the user.
+func ListZoteroLibraries() ([]api.ZoteroLibrary, error) {
+	return api.QueryZoteroLibraries()
+}
+
+// CreateZoteroExport creates an export target on the TPIX server.
+func CreateZoteroExport(name string, namespaceID string, libraryType string, libraryID int64, collectionKey string, format string, reporter ReportFunc) (string, error) {
+	target := api.ZoteroExportTarget{
+		NamespaceID:   namespaceID,
+		Name:          name,
+		LibraryType:   libraryType,
+		LibraryID:     libraryID,
+		CollectionKey: collectionKey,
+		Format:        format,
+	}
+
+	if reporter != nil {
+		reporter(fmt.Sprintf("Creating export for library %s:%d, collection %s...\n", libraryType, libraryID, collectionKey))
+	}
+
+	exportID, err := api.CreateZoteroExport(target)
+	if err != nil {
+		return "", fmt.Errorf("failed to create export: %w", err)
+	}
+
+	if reporter != nil {
+		reporter(fmt.Sprintf("Export created: %s\n", exportID))
+	}
+
+	return exportID, nil
+}
+
+// FetchZoteroExport fetches the content of a Zotero export.
+func FetchZoteroExport(exportID string, writer io.Writer) error {
+	return api.FetchLatestZoteroCollections(exportID, writer)
+}
+
+// DeleteZoteroExport deletes an existing Zotero export.
+func DeleteZoteroExport(exportID string, reporter ReportFunc) error {
+	if reporter != nil {
+		reporter(fmt.Sprintf("Deleting export %s...\n", exportID))
+	}
+
+	if err := api.DeleteZoteroExport(exportID); err != nil {
+		return fmt.Errorf("failed to delete export: %w", err)
+	}
+
+	if reporter != nil {
+		reporter("Export deleted.\n")
 	}
 
 	return nil

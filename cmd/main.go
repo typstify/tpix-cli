@@ -33,6 +33,7 @@ func main() {
 	rootCmd.AddCommand(versionCmd())
 	rootCmd.AddCommand(updateCmd())
 	rootCmd.AddCommand(cachePathCmd())
+	rootCmd.AddCommand(zoteroCmd())
 
 	rootCmd.Execute()
 }

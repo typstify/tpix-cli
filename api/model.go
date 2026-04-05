@@ -89,3 +89,39 @@ type TokenResponse struct {
 	ExpiresIn    int    `json:"expires_in"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 }
+
+// ZoteroGroup represents a Zotero group
+type ZoteroGroup struct {
+	ID          int    `json:"id"`
+	Version     int    `json:"version"`
+	Name        string `json:"name"`
+	Owner       int    `json:"owner"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Url         string `json:"url"`
+}
+
+// ZoteroCollection represents a Zotero collection
+type ZoteroCollection struct {
+	Key              string `json:"key"`
+	Version          int    `json:"version"`
+	Name             string `json:"name"`
+	ParentCollection string `json:"parentCollection"`
+}
+
+type ZoteroLibrary struct {
+	Namespace   string             `json:"namespace"`
+	NamespaceID string             `json:"namespace_id"`
+	Scope       string             `json:"scope"` // "users"||"groups"
+	Library     ZoteroGroup        `json:"library"`
+	Collections []ZoteroCollection `json:"collections"`
+}
+
+type ZoteroExportTarget struct {
+	NamespaceID   string `json:"namespace_id"`
+	Name          string `json:"name" binding:"required"`
+	LibraryType   string `json:"library_type" binding:"required"`
+	LibraryID     int64  `json:"library_id" binding:"required"`
+	CollectionKey string `json:"collection_key"`
+	Format        string `json:"format"`
+}

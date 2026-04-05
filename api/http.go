@@ -222,3 +222,97 @@ func UploadPackage(packagePath, namespace string) (*UploadResponse, error) {
 
 	return &uploadResp, nil
 }
+
+// QueryZoteroLibraries fetches zotero libraries the current user has access
+// permission. This includes libraries granted in personal account, and libraries
+// granted by the namespace owners.
+func QueryZoteroLibraries() ([]ZoteroLibrary, error) {
+	url := "/api/v1/zotero/libraries"
+	resp, err := client.MakeRequest("GET", url, nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch zotero libraries: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch zotero libraries: %s", string(body))
+	}
+
+	var libraries []ZoteroLibrary
+	if err := json.NewDecoder(resp.Body).Decode(&libraries); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return libraries, nil
+}
+
+// CreateZoteroExport creates an export target on TPIX server.
+// Requires a registered Zotero API key in the namespace or current user.
+func CreateZoteroExport(target ZoteroExportTarget) (string, error) {
+	url := "/api/v1/zotero/exports"
+
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(&target)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.MakeRequest("POST", url, &buf, "application/json")
+	if err != nil {
+		return "", fmt.Errorf("failed to create zotero exports: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to create zotero exports: %s", string(body))
+	}
+
+	var exportResp struct {
+		ExportID string `json:"exportId"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&exportResp); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return exportResp.ExportID, nil
+}
+
+// FetchLatestZoteroCollections fetches the latest version of Zotero items
+// from TPIX server.
+func FetchLatestZoteroCollections(exportID string, writer io.Writer) error {
+	url := fmt.Sprintf("/api/v1/zotero/exports/%s", exportID)
+
+	resp, err := client.MakeRequest("GET", url, nil, "")
+	if err != nil {
+		return fmt.Errorf("failed to delete zotero export: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to export zotero collections: %s", string(body))
+	}
+
+	_, err = io.Copy(writer, resp.Body)
+	return err
+}
+
+func DeleteZoteroExport(exportID string) error {
+	url := fmt.Sprintf("/api/v1/zotero/exports/%s", exportID)
+
+	resp, err := client.MakeRequest("DELETE", url, nil, "")
+	if err != nil {
+		return fmt.Errorf("failed to delete zotero export: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete zotero export: %s", string(body))
+	}
+
+	return nil
+}
