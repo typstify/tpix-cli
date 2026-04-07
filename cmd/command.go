@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	cli "github.com/typstify/tpix-cli"
@@ -61,7 +62,10 @@ func loginCmd() *cobra.Command {
 // searchPkgCmd searches Typst packages from TPIX server.
 func searchPkgCmd() *cobra.Command {
 	var namespace string
+	var kind string
+	var sort string
 	var limit int
+	var verbose bool
 
 	cmd := &cobra.Command{
 		Use:   "search <query>",
@@ -70,7 +74,7 @@ func searchPkgCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := args[0]
 
-			result, err := cli.SearchPackages(namespace, query, limit)
+			result, err := cli.SearchPackages(namespace, query, kind, sort, limit)
 			if err != nil {
 				fmt.Printf("failed to search packages: %v", err)
 				return nil
@@ -78,7 +82,23 @@ func searchPkgCmd() *cobra.Command {
 
 			fmt.Printf("Found %d results for '%s':\n\n", result.Count, query)
 			for _, r := range result.Results {
-				fmt.Printf("@%s/%s - %s\n", r.Namespace, r.Name, r.Description)
+				cmdReporter(fmt.Sprintf("@%s/%s - %s\n", r.Namespace, r.Name, r.Description))
+				if verbose {
+					cmdReporter(fmt.Sprintf("  template: %t\n", r.IsTemplate))
+					cmdReporter(fmt.Sprintf("  version: %s\n", r.LatestVersion))
+					if len(r.Authors) > 0 {
+						cmdReporter(fmt.Sprintf("  authors: %s\n", strings.Join(r.Authors, ", ")))
+					}
+					if len(r.Categories) > 0 {
+						cmdReporter(fmt.Sprintf("  categories: %s\n", strings.Join(r.Categories, ", ")))
+					}
+					if len(r.Disciplines) > 0 {
+						cmdReporter(fmt.Sprintf("disciplines: %s\n", strings.Join(r.Disciplines, ", ")))
+					}
+					if r.License != "" {
+						cmdReporter(fmt.Sprintf("\tlicense: %s\n", r.License))
+					}
+				}
 			}
 
 			return nil
@@ -86,7 +106,10 @@ func searchPkgCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
+	cmd.Flags().StringVarP(&kind, "kind", "k", "all", "Filter by package kind, possible values: all (default), pkg, template")
+	cmd.Flags().StringVarP(&sort, "sort", "s", "", "Filter by package kind, possible values: name, updated, or popularity (default)")
 	cmd.Flags().IntVarP(&limit, "limit", "l", 20, "Limit number of results")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show verbose outputs.")
 
 	return cmd
 }
@@ -292,6 +315,9 @@ func queryPkgCmd() *cobra.Command {
 			fmt.Printf("Website: %s\n", pkg.HomepageURL)
 			fmt.Printf("Repository: %s\n", pkg.RepositoryURL)
 			fmt.Printf("License: %s\n", pkg.License)
+			// Show authors for latest version
+			fmt.Printf("Authors: %s\n", strings.Join(pkg.LatestVersion.Authors, ", "))
+
 			fmt.Printf("\nVersions:\n")
 			for _, v := range pkg.Versions {
 				fmt.Printf("  %s (Typst: %s)\n", v.Version, v.TypstVersion)
@@ -716,11 +742,11 @@ Interactive mode: run without flags to select library and collection.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&format, "format", "", "Export format (biblatex, bibtex)")
-	cmd.Flags().StringVar(&collection, "collection", "", "Collection key")
-	cmd.Flags().StringVar(&output, "output", "", "Output file")
-	cmd.Flags().Int64Var(&libraryID, "library", 0, "Library ID")
-	cmd.Flags().StringVar(&libraryType, "library-type", "", "Library type (users/groups)")
+	cmd.Flags().StringVarP(&format, "format", "f", "", "Export format (biblatex, bibtex)")
+	cmd.Flags().StringVarP(&collection, "collection", "c", "", "Collection key")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "Output file")
+	cmd.Flags().Int64VarP(&libraryID, "library", "l", 0, "Library ID")
+	cmd.Flags().StringVarP(&libraryType, "library-type", "t", "", "Library type (users/groups)")
 
 	return cmd
 }

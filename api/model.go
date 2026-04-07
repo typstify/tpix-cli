@@ -11,9 +11,16 @@ type SearchResponse struct {
 }
 
 type SearchResult struct {
-	Namespace   string `json:"namespace"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Namespace     string     `json:"namespace"`
+	Name          string     `json:"name"`
+	Description   string     `json:"description"`
+	License       string     `json:"license"`
+	CreatedAt     *time.Time `json:"created_at"`
+	IsTemplate    bool       `json:"is_template"`
+	Authors       []string   `json:"authors"`
+	Categories    []string   `json:"categories"`
+	Disciplines   []string   `json:"disciplines"`
+	LatestVersion string     `json:"latest_version"`
 }
 
 // PackageResponse represents a package details response
@@ -37,6 +44,7 @@ type PackageVersionInfo struct {
 	TypstVersion string     `json:"typst_version"`
 	SHA256       string     `json:"sha256"`
 	PublishedAt  *time.Time `json:"published_at"`
+	Authors      []string   `json:"authors"`
 }
 
 // PackageVersionsResponse represents the response from the versions endpoint

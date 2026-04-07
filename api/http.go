@@ -22,10 +22,18 @@ func Init(provider CredentialsProvider) {
 }
 
 // SearchPackages fetches packages matching a query from the TPIX server.
-func SearchPackages(query, namespace string, limit int) (*SearchResponse, error) {
+// kind: "pkg", "template", or "all"
+// sort: "name", "updated", or "popularity" (default)
+func SearchPackages(query, namespace string, kind string, sort string, limit int) (*SearchResponse, error) {
 	url := fmt.Sprintf("/api/v1/search?q=%s", query)
 	if namespace != "" {
 		url += "&namespace=" + namespace
+	}
+	if kind != "" {
+		url += "&kind=" + kind
+	}
+	if sort != "" {
+		url += "&sort=" + sort
 	}
 	if limit > 0 {
 		url += fmt.Sprintf("&limit=%d", limit)
