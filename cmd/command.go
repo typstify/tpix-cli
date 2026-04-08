@@ -63,6 +63,7 @@ func loginCmd() *cobra.Command {
 func searchPkgCmd() *cobra.Command {
 	var namespace string
 	var kind string
+	var category string
 	var sort string
 	var limit int
 	var verbose bool
@@ -74,7 +75,7 @@ func searchPkgCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := args[0]
 
-			result, err := cli.SearchPackages(namespace, query, kind, sort, limit)
+			result, err := cli.SearchPackages(namespace, query, kind, category, sort, limit)
 			if err != nil {
 				fmt.Printf("failed to search packages: %v", err)
 				return nil
@@ -93,10 +94,10 @@ func searchPkgCmd() *cobra.Command {
 						cmdReporter(fmt.Sprintf("  categories: %s\n", strings.Join(r.Categories, ", ")))
 					}
 					if len(r.Disciplines) > 0 {
-						cmdReporter(fmt.Sprintf("disciplines: %s\n", strings.Join(r.Disciplines, ", ")))
+						cmdReporter(fmt.Sprintf("  disciplines: %s\n", strings.Join(r.Disciplines, ", ")))
 					}
 					if r.License != "" {
-						cmdReporter(fmt.Sprintf("\tlicense: %s\n", r.License))
+						cmdReporter(fmt.Sprintf("  license: %s\n", r.License))
 					}
 				}
 			}
@@ -107,6 +108,7 @@ func searchPkgCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringVarP(&kind, "kind", "k", "all", "Filter by package kind, possible values: all (default), pkg, template")
+	cmd.Flags().StringVarP(&category, "category", "c", "", "Filter by category, TPIX accept categories defined by Typst Universe.")
 	cmd.Flags().StringVarP(&sort, "sort", "s", "", "Filter by package kind, possible values: name, updated, or popularity (default)")
 	cmd.Flags().IntVarP(&limit, "limit", "l", 20, "Limit number of results")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show verbose outputs.")
@@ -354,7 +356,7 @@ Files and directories can be excluded using the --exclude flag or the exclude fi
 				return err
 			}
 
-			fmt.Printf("Package created: %s\n", &finalPath)
+			fmt.Printf("Package created: %s\n", finalPath)
 			return nil
 		},
 	}

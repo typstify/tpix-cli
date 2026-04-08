@@ -137,7 +137,7 @@ func PollLoginResult(deviceCode string, expiresIn int, reporter ReportFunc) (*ap
 }
 
 // SearchPackages searches Typst packages from TPIX server.
-func SearchPackages(namespace string, query string, kind string, sort string, limit int) (*api.SearchResponse, error) {
+func SearchPackages(namespace string, query string, kind string, category string, sort string, limit int) (*api.SearchResponse, error) {
 	if query == "" {
 		return nil, errors.New("missing query")
 	}
@@ -146,7 +146,7 @@ func SearchPackages(namespace string, query string, kind string, sort string, li
 		limit = 20
 	}
 
-	return api.SearchPackages(query, namespace, kind, sort, limit)
+	return api.SearchPackages(query, namespace, kind, category, sort, limit)
 }
 
 // DownloadPackage download Typst packages from TPIX server.
