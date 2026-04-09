@@ -165,7 +165,7 @@ func DownloadPackage(pkgSpec string, cacheDir string, noDeps bool, reporter Repo
 		if len(pkg.Versions) == 0 {
 			return 0, fmt.Errorf("no versions available for package")
 		}
-		version = pkg.Versions[len(pkg.Versions)-1].Version
+		version = pkg.Versions[0].Version
 	}
 
 	if cacheDir == "" {
@@ -182,7 +182,7 @@ func DownloadPackage(pkgSpec string, cacheDir string, noDeps bool, reporter Repo
 	}
 
 	if reporter != nil {
-		reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", visited))
+		reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(visited)))
 	}
 
 	return len(visited), nil

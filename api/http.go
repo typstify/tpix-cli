@@ -124,35 +124,7 @@ func FetchPackage(namespace, name string) (*PackageResponse, error) {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// Fetch all versions
-	versions, err := fetchPackageVersions(namespace, name)
-	if err == nil && len(versions) > 0 {
-		pkg.Versions = versions
-	}
-
 	return &pkg, nil
-}
-
-// FetchPackageVersions fetches all versions for a package.
-func fetchPackageVersions(namespace, name string) ([]PackageVersionInfo, error) {
-	url := fmt.Sprintf("/api/v1/packages/%s/%s/versions", namespace, name)
-	resp, err := client.MakeRequest("GET", url, nil, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch versions: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get versions: %s", string(body))
-	}
-
-	var versionsResp PackageVersionsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&versionsResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return versionsResp.Versions, nil
 }
 
 // FetchDependencies fetches the dependencies for a specific package version.

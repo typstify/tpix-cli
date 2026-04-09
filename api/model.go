@@ -1,6 +1,10 @@
 package api
 
-import "time"
+import (
+	"time"
+
+	"github.com/typstify/tpix-cli/bundler"
+)
 
 // API response types
 
@@ -10,46 +14,45 @@ type SearchResponse struct {
 	Results []SearchResult `json:"results"`
 }
 
+// SearchResult represents a single search result
 type SearchResult struct {
-	Namespace     string     `json:"namespace"`
-	Name          string     `json:"name"`
-	Description   string     `json:"description"`
-	License       string     `json:"license"`
-	CreatedAt     *time.Time `json:"created_at"`
-	IsTemplate    bool       `json:"is_template"`
-	Authors       []string   `json:"authors"`
-	Categories    []string   `json:"categories"`
-	Disciplines   []string   `json:"disciplines"`
-	LatestVersion string     `json:"latest_version"`
-}
-
-// PackageResponse represents a package details response
-type PackageResponse struct {
-	ID            string               `json:"id"`
-	Name          string               `json:"name"`
-	Namespace     string               `json:"namespace"`
-	Description   string               `json:"description"`
-	HomepageURL   string               `json:"homepage_url"`
-	RepositoryURL string               `json:"repository_url"`
-	License       string               `json:"license"`
-	CreatedAt     *time.Time           `json:"created_at"`
-	UpdatedAt     *time.Time           `json:"updated_at"`
-	LatestVersion PackageVersionInfo   `json:"latest_version"`
-	Versions      []PackageVersionInfo `json:"versions"`
+	Name          string    `json:"name"`
+	Namespace     string    `json:"namespace"`
+	Description   string    `json:"description"`
+	LatestVersion string    `json:"latest_version"`
+	PublishedAt   time.Time `json:"published_at"` // latest published time
+	License       string    `json:"license"`
+	IsTemplate    bool      `json:"is_template"`
+	Authors       []string  `json:"authors"`
+	Categories    []string  `json:"categories"`
+	Disciplines   []string  `json:"disciplines"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // PackageVersionInfo represents package version information
 type PackageVersionInfo struct {
-	Version      string     `json:"version"`
-	TypstVersion string     `json:"typst_version"`
-	SHA256       string     `json:"sha256"`
-	PublishedAt  *time.Time `json:"published_at"`
-	Authors      []string   `json:"authors"`
+	Version     string           `json:"version"`
+	SHA256      string           `json:"sha256"`
+	PublishedAt time.Time        `json:"published_at"`
+	Meta        bundler.Manifest `json:"meta"`
 }
 
-// PackageVersionsResponse represents the response from the versions endpoint
-type PackageVersionsResponse struct {
-	Versions []PackageVersionInfo `json:"versions"`
+// PackageResponse represents a package details response
+type PackageResponse struct {
+	ID              string               `json:"id"`
+	Name            string               `json:"name"`
+	Namespace       string               `json:"namespace"`
+	SourceType      string               `json:"source_type"`
+	ExternalURL     string               `json:"external_url"`
+	Description     string               `json:"description"`
+	HomepageURL     string               `json:"homepage_url"`
+	RepositoryURL   string               `json:"repository_url"`
+	License         string               `json:"license"`
+	IsTemplate      bool                 `json:"is_template"`
+	LastPublishedAt time.Time            `json:"last_published_at"` // latest published time
+	CreatedAt       time.Time            `json:"created_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
+	Versions        []PackageVersionInfo `json:"versions"`
 }
 
 // UploadResponse represents an upload response.

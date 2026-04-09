@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	cli "github.com/typstify/tpix-cli"
@@ -90,6 +91,7 @@ func searchPkgCmd() *cobra.Command {
 					if len(r.Authors) > 0 {
 						cmdReporter(fmt.Sprintf("  authors: %s\n", strings.Join(r.Authors, ", ")))
 					}
+					cmdReporter(fmt.Sprintf("  published at: %s\n", r.PublishedAt.Format(time.DateOnly)))
 					if len(r.Categories) > 0 {
 						cmdReporter(fmt.Sprintf("  categories: %s\n", strings.Join(r.Categories, ", ")))
 					}
@@ -314,15 +316,26 @@ func queryPkgCmd() *cobra.Command {
 
 			fmt.Printf("Package: @%s/%s\n\n", pkg.Namespace, pkg.Name)
 			fmt.Printf("Description: %s\n", pkg.Description)
+			fmt.Printf("Template: %t\n", pkg.IsTemplate)
+			fmt.Printf("License: %s\n", pkg.License)
+
+			if len(pkg.Versions) > 0 {
+				latestVer := pkg.Versions[0]
+
+				fmt.Printf("Latest Version:  %s\n", latestVer.Version)
+				fmt.Printf("Minimum Typst Version: %s\n", latestVer.Meta.Package.Compiler)
+
+				fmt.Printf("Authors: %s\n", strings.Join(latestVer.Meta.Package.Authors, ", "))
+				fmt.Printf("Categories: %s\n", strings.Join(latestVer.Meta.Package.Categories, ", "))
+				fmt.Printf("Disciplines: %s\n", strings.Join(latestVer.Meta.Package.Disciplines, ", "))
+			}
+			fmt.Printf("Last Publish: %s\n", pkg.LastPublishedAt.Format(time.DateOnly))
 			fmt.Printf("Website: %s\n", pkg.HomepageURL)
 			fmt.Printf("Repository: %s\n", pkg.RepositoryURL)
-			fmt.Printf("License: %s\n", pkg.License)
-			// Show authors for latest version
-			fmt.Printf("Authors: %s\n", strings.Join(pkg.LatestVersion.Authors, ", "))
 
 			fmt.Printf("\nVersions:\n")
 			for _, v := range pkg.Versions {
-				fmt.Printf("  %s (Typst: %s)\n", v.Version, v.TypstVersion)
+				fmt.Printf("  %s (Typst: %s)\n", v.Version, v.Meta.Package.Compiler)
 			}
 
 			return nil
