@@ -324,6 +324,11 @@ func PushPackage(packagePath string, namespace string, reporter ReportFunc) erro
 	return nil
 }
 
+// GetUserProfile queries the user profile from TPIX server.
+func GetUserProfile() (*api.UserProfile, error) {
+	return api.GetUserProfile()
+}
+
 // ListZoteroLibraries returns the list of Zotero libraries accessible to the user.
 func ListZoteroLibraries() ([]api.ZoteroLibrary, error) {
 	return api.QueryZoteroLibraries()

@@ -301,3 +301,25 @@ func DeleteZoteroExport(exportID string) error {
 
 	return nil
 }
+
+func GetUserProfile() (*UserProfile, error) {
+	url := "/api/v1/profile"
+
+	resp, err := client.MakeRequest("GET", url, nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user profile: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to get user profile: %s", string(body))
+	}
+
+	var profile UserProfile
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &profile, nil
+}

@@ -101,6 +101,19 @@ type TokenResponse struct {
 	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
+type UserProfile struct {
+	Email      string          `json:"email"`
+	Username   string          `json:"username"`
+	CreatedAt  time.Time       `json:"created_at"`
+	Namespaces []UserNamespace `json:"namespaces"`
+	Subscribed bool            `json:"subscribed"`
+}
+
+type UserNamespace struct {
+	Name       string `json:"name"`
+	Permission string `json:"permission"`
+}
+
 // ZoteroGroup represents a Zotero group
 type ZoteroGroup struct {
 	ID          int    `json:"id"`
