@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -25,26 +26,31 @@ func Init(provider CredentialsProvider) {
 // kind: "pkg", "template", or "all"
 // sort: "name", "updated", or "popularity" (default)
 func SearchPackages(query, namespace string, kind string, category string, sort string, limit int) (*SearchResponse, error) {
-	url := fmt.Sprintf("/api/v1/search?q=%s", query)
+	path, _ := url.Parse("/api/v1/search")
+
+	queries := url.Values{}
+	if query != "" {
+		queries.Add("q", query)
+	}
 	if namespace != "" {
-		url += "&namespace=" + namespace
+		queries.Add("namespace", namespace)
 	}
 	if kind != "" {
-		url += "&kind=" + kind
+		queries.Add("kind", kind)
 	}
-
 	if category != "" {
-		url += "&category=" + category
+		queries.Add("category", category)
 	}
-
 	if sort != "" {
-		url += "&sort=" + sort
+		queries.Add("sort", sort)
 	}
 	if limit > 0 {
-		url += fmt.Sprintf("&limit=%d", limit)
+		queries.Add("limit", fmt.Sprintf("%d", limit))
 	}
 
-	resp, err := client.MakeRequest("GET", url, nil, "")
+	path.RawQuery = queries.Encode()
+
+	resp, err := client.MakeRequest("GET", path.String(), nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to search packages: %w", err)
 	}
@@ -66,9 +72,9 @@ func SearchPackages(query, namespace string, kind string, category string, sort 
 // DownloadPackage downloads a package, extracts it to the cache directory,
 // and optionally saves the archive to output path.
 func DownloadPackage(namespace, name, version string, cacheDir string) error {
-	url := fmt.Sprintf("/api/v1/download/%s/%s/%s", namespace, name, version)
+	url := &url.URL{Path: fmt.Sprintf("/api/v1/download/%s/%s/%s", namespace, name, version)}
 
-	resp, err := client.MakeRequest("GET", url, nil, "")
+	resp, err := client.MakeRequest("GET", url.String(), nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to download package: %w", err)
 	}
@@ -107,8 +113,8 @@ func DownloadPackage(namespace, name, version string, cacheDir string) error {
 
 // FetchPackage fetches package details from the TPIX server.
 func FetchPackage(namespace, name string) (*PackageResponse, error) {
-	url := fmt.Sprintf("/api/v1/packages/%s/%s", namespace, name)
-	resp, err := client.MakeRequest("GET", url, nil, "")
+	path := &url.URL{Path: fmt.Sprintf("/api/v1/packages/%s/%s", namespace, name)}
+	resp, err := client.MakeRequest("GET", path.String(), nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch package: %w", err)
 	}
@@ -129,8 +135,8 @@ func FetchPackage(namespace, name string) (*PackageResponse, error) {
 
 // FetchDependencies fetches the dependencies for a specific package version.
 func FetchDependencies(namespace, name, version string) ([]DependencyInfo, error) {
-	url := fmt.Sprintf("/api/v1/packages/%s/%s/%s/dependencies", namespace, name, version)
-	resp, err := client.MakeRequest("GET", url, nil, "")
+	path := &url.URL{Path: fmt.Sprintf("/api/v1/packages/%s/%s/%s/dependencies", namespace, name, version)}
+	resp, err := client.MakeRequest("GET", path.String(), nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch dependencies: %w", err)
 	}
@@ -184,8 +190,8 @@ func UploadPackage(packagePath, namespace string) (*UploadResponse, error) {
 	writer.Close()
 
 	// Create request
-	url := "/api/v1/packages/upload"
-	resp, err := client.MakeRequest("POST", url, &buf, writer.FormDataContentType())
+	path := "/api/v1/packages/upload"
+	resp, err := client.MakeRequest("POST", path, &buf, writer.FormDataContentType())
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload package: %w", err)
 	}
@@ -212,8 +218,8 @@ func UploadPackage(packagePath, namespace string) (*UploadResponse, error) {
 // permission. This includes libraries granted in personal account, and libraries
 // granted by the namespace owners.
 func QueryZoteroLibraries() ([]ZoteroLibrary, error) {
-	url := "/api/v1/zotero/libraries"
-	resp, err := client.MakeRequest("GET", url, nil, "")
+	path := "/api/v1/zotero/libraries"
+	resp, err := client.MakeRequest("GET", path, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch zotero libraries: %w", err)
 	}
@@ -235,7 +241,7 @@ func QueryZoteroLibraries() ([]ZoteroLibrary, error) {
 // CreateZoteroExport creates an export target on TPIX server.
 // Requires a registered Zotero API key in the namespace or current user.
 func CreateZoteroExport(target ZoteroExportTarget) (string, error) {
-	url := "/api/v1/zotero/exports"
+	path := "/api/v1/zotero/exports"
 
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(&target)
@@ -243,7 +249,7 @@ func CreateZoteroExport(target ZoteroExportTarget) (string, error) {
 		return "", err
 	}
 
-	resp, err := client.MakeRequest("POST", url, &buf, "application/json")
+	resp, err := client.MakeRequest("POST", path, &buf, "application/json")
 	if err != nil {
 		return "", fmt.Errorf("failed to create zotero exports: %w", err)
 	}
@@ -268,9 +274,9 @@ func CreateZoteroExport(target ZoteroExportTarget) (string, error) {
 // FetchLatestZoteroCollections fetches the latest version of Zotero items
 // from TPIX server.
 func FetchLatestZoteroCollections(exportID string, writer io.Writer) error {
-	url := fmt.Sprintf("/api/v1/zotero/exports/%s", exportID)
+	path := &url.URL{Path: fmt.Sprintf("/api/v1/zotero/exports/%s", exportID)}
 
-	resp, err := client.MakeRequest("GET", url, nil, "")
+	resp, err := client.MakeRequest("GET", path.String(), nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to delete zotero export: %w", err)
 	}
@@ -286,9 +292,9 @@ func FetchLatestZoteroCollections(exportID string, writer io.Writer) error {
 }
 
 func DeleteZoteroExport(exportID string) error {
-	url := fmt.Sprintf("/api/v1/zotero/exports/%s", exportID)
+	path := &url.URL{Path: fmt.Sprintf("/api/v1/zotero/exports/%s", exportID)}
 
-	resp, err := client.MakeRequest("DELETE", url, nil, "")
+	resp, err := client.MakeRequest("DELETE", path.String(), nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to delete zotero export: %w", err)
 	}
@@ -303,9 +309,9 @@ func DeleteZoteroExport(exportID string) error {
 }
 
 func GetUserProfile() (*UserProfile, error) {
-	url := "/api/v1/profile"
+	path := "/api/v1/profile"
 
-	resp, err := client.MakeRequest("GET", url, nil, "")
+	resp, err := client.MakeRequest("GET", path, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user profile: %w", err)
 	}
