@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -138,10 +137,6 @@ func PollLoginResult(deviceCode string, expiresIn int, reporter ReportFunc) (*ap
 
 // SearchPackages searches Typst packages from TPIX server.
 func SearchPackages(namespace string, query string, kind string, category string, sort string, limit int) (*api.SearchResponse, error) {
-	if query == "" {
-		return nil, errors.New("missing query")
-	}
-
 	if limit <= 0 {
 		limit = 20
 	}

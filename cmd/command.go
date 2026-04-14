@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,6 +76,9 @@ func searchPkgCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := args[0]
+			if query == "" {
+				return errors.New("missing query")
+			}
 
 			result, err := cli.SearchPackages(namespace, query, kind, category, sort, limit)
 			if err != nil {

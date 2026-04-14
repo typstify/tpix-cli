@@ -10,6 +10,7 @@ import (
 
 type SearchResponse struct {
 	Query   string         `json:"query"`
+	Total   int            `json:"total"`
 	Count   int            `json:"count"`
 	Results []SearchResult `json:"results"`
 }
