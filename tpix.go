@@ -252,6 +252,10 @@ func QueryPackage(pkgSpec string) (*api.PackageResponse, error) {
 }
 
 func BundlePackage(srcDir string, outputFile string, excludedFiles []string) (string, error) {
+	srcDir, err := filepath.Abs(srcDir)
+	if err != nil {
+		return "", err
+	}
 
 	// Check if directory exists
 	info, err := os.Stat(srcDir)
@@ -271,7 +275,7 @@ func BundlePackage(srcDir string, outputFile string, excludedFiles []string) (st
 	// Determine output path
 	if outputFile == "" {
 		// Use directory name with .tar.gz extension
-		outputFile = filepath.Base(srcDir) + ".tar.gz"
+		outputFile = filepath.Join(srcDir, filepath.Base(srcDir)+".tar.gz")
 	}
 
 	// Create package

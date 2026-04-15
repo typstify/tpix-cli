@@ -65,6 +65,24 @@ func (p *PackageCreator) CreatePackage(srcDir, outputPath string) error {
 			return walkErr
 		}
 
+		if path == outputPath {
+			return nil
+		}
+
+		// Check if it starts with a dot
+		if strings.HasPrefix(info.Name(), ".") {
+			// Skip entire hidden directories
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Symlinks are not supported in packages
+		if info.Mode()&os.ModeSymlink == os.ModeSymlink {
+			return fmt.Errorf("symbol links are not supported: %s", path)
+		}
+
 		// Get relative path from source directory
 		relPath, err := filepath.Rel(srcDir, path)
 		if err != nil {
