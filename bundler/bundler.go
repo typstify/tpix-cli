@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // PackageCreator creates a Typst package from a directory
@@ -159,37 +161,26 @@ func (p *PackageCreator) validateManifest(manifest *Manifest) error {
 	return nil
 }
 
-// shouldExclude checks if a path should be excluded based on patterns
+// shouldExclude checks if a path should be excluded based on patterns.
+// This method tries to aligh how Typst package bundler handles the exclude fields,
+// as shown here: https://github.com/typst/packages/blob/main/bundler/src/main.rs#L402
 func (p *PackageCreator) shouldExclude(path string, patterns []string) bool {
 	// Normalize path to use forward slashes
 	path = filepath.ToSlash(path)
 
 	for _, pattern := range patterns {
-		pattern = filepath.ToSlash(pattern)
+		pattern = filepath.ToSlash(strings.TrimPrefix(pattern, "./"))
 
-		// Exact match
-		if path == pattern {
+		// Use doublestar for recursive (**) and standard glob matching.
+		// This aligns with how
+		matched, err := doublestar.Match(pattern, path)
+		if err == nil && matched {
 			return true
 		}
 
-		// Directory match (exclude all contents of directory)
-		if strings.HasSuffix(pattern, "/") {
-			dir := strings.TrimSuffix(pattern, "/")
-			if strings.HasPrefix(path, dir+"/") {
-				return true
-			}
-		}
-
-		// Wildcard match at the end
-		if strings.HasSuffix(pattern, "*") {
-			prefix := strings.TrimSuffix(pattern, "*")
-			if strings.HasPrefix(path, prefix) {
-				return true
-			}
-		}
-
-		// Glob pattern match
-		if matched, _ := filepath.Match(pattern, path); matched {
+		// Handle Directory Globs (e.g., "tests/" excluding all "tests/...")
+		// If the pattern ends in / and the path starts with that pattern, exclude it.
+		if strings.HasSuffix(pattern, "/") && strings.HasPrefix(path, pattern) {
 			return true
 		}
 	}
