@@ -9,11 +9,15 @@ import (
 	"sync"
 
 	"github.com/typstify/tpix-cli/config"
+	"github.com/typstify/tpix-cli/version"
 )
 
 const (
-	TpixServer          = "https://tpix.typstify.com"
-	TpixClientUserAgent = "tpix-client/v1.0.0"
+	TpixServer = "https://tpix.typstify.com"
+)
+
+var (
+	TpixClientUserAgent = fmt.Sprintf("tpix-client/%s", version.Version)
 )
 
 type CredentialsProvider interface {
@@ -59,15 +63,18 @@ func (c *HttpClient) MakeRequest(method, url string, body io.Reader, contentType
 	// If 401 and we have a refresh token, try to refresh and retry
 	if resp.StatusCode == http.StatusUnauthorized && cred.RefreshToken != "" {
 		resp.Body.Close()
-		if refreshErr := c.refreshAccessToken(cred); refreshErr == nil {
-			// reload config
-			cfg, err := config.Load()
-			if err != nil {
-				return nil, err
-			}
-
-			return c.doRequest(method, url, bodyBytes, contentType, cfg.AccessToken)
+		refreshErr := c.refreshAccessToken(cred)
+		if refreshErr != nil {
+			return nil, refreshErr
 		}
+
+		// reload config
+		cfg, err := c.cred.Load()
+		if err != nil {
+			return nil, err
+		}
+
+		return c.doRequest(method, url, bodyBytes, contentType, cfg.AccessToken)
 	}
 
 	return resp, nil
