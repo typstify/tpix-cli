@@ -142,7 +142,7 @@ func getPkgCmd() *cobra.Command {
 				return fmt.Errorf("typst cache directory not configured")
 			}
 
-			_, err = cli.DownloadPackage(pkgSpec, cacheDir, noDeps, cmdReporter)
+			_, _, err = cli.DownloadPackage(pkgSpec, cacheDir, noDeps, cmdReporter)
 			return err
 		},
 	}

@@ -147,7 +147,7 @@ func SearchPackages(namespace string, query string, kind string, category string
 // DownloadPackage download Typst packages from TPIX server.
 // pkgSpec should follow the pattern:  @namespace/name:version. Refer to [parsePkgSpec] to know details.
 // If noDeps is true, it will skip fetching transitive dependencies.
-func DownloadPackage(pkgSpec string, cacheDir string, noDeps bool, reporter ReportFunc) (int, error) {
+func DownloadPackage(pkgSpec string, cacheDir string, noDeps bool, reporter ReportFunc) (string, int, error) {
 	// Parse namespace/name:version
 	namespace, name, version := ParsePkgSpec(pkgSpec)
 
@@ -155,16 +155,16 @@ func DownloadPackage(pkgSpec string, cacheDir string, noDeps bool, reporter Repo
 		// Get latest version first
 		pkg, err := api.FetchPackage(namespace, name)
 		if err != nil {
-			return 0, err
+			return "", 0, err
 		}
 		if len(pkg.Versions) == 0 {
-			return 0, fmt.Errorf("no versions available for package")
+			return "", 0, fmt.Errorf("no versions available for package")
 		}
 		version = pkg.Versions[0].Version
 	}
 
 	if cacheDir == "" {
-		return 0, fmt.Errorf("typst cache directory not configured")
+		return "", 0, fmt.Errorf("typst cache directory not configured")
 	}
 
 	if reporter != nil {
@@ -173,14 +173,15 @@ func DownloadPackage(pkgSpec string, cacheDir string, noDeps bool, reporter Repo
 
 	visited := make(map[string]bool)
 	if err := fetchWithDeps(namespace, name, version, cacheDir, visited, noDeps, reporter); err != nil {
-		return 0, err
+		return "", 0, err
 	}
 
 	if reporter != nil {
 		reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(visited)))
 	}
 
-	return len(visited), nil
+	pkgPath := filepath.Join(cacheDir, namespace, name, version)
+	return pkgPath, len(visited), nil
 }
 
 func DownloadProjectDependencies(projectDir string, cacheDir string, dryRun bool, reporter ReportFunc) error {
@@ -380,4 +381,10 @@ func DeleteZoteroExport(exportID string, reporter ReportFunc) error {
 	}
 
 	return nil
+}
+
+// ListLLMAccesiblePackages retrieves a markdown file containing all user
+// accessible package/template metadata. This API is dedicated for LLM use.
+func GetPackageIndex() (string, error) {
+	return api.GetPackageIndex()
 }

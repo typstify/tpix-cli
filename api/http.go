@@ -70,7 +70,7 @@ func SearchPackages(query, namespace string, kind string, category string, sort 
 }
 
 // DownloadPackage downloads a package, extracts it to the cache directory,
-// and optionally saves the archive to output path.
+// and saves the archive to output path.
 func DownloadPackage(namespace, name, version string, cacheDir string) error {
 	url := &url.URL{Path: fmt.Sprintf("/api/v1/download/%s/%s/%s", namespace, name, version)}
 
@@ -328,4 +328,26 @@ func GetUserProfile() (*UserProfile, error) {
 	}
 
 	return &profile, nil
+}
+
+func GetPackageIndex() (string, error) {
+	path := "/api/v1/llm.txt"
+
+	resp, err := client.MakeRequest("GET", path, nil, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to download llm.txt: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to get llm.txt: %s", string(body))
+	}
+
+	txt, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read llm.txt: %s", err)
+	}
+
+	return string(txt), nil
 }
