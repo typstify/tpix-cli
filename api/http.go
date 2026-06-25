@@ -22,6 +22,22 @@ func Init(provider CredentialsProvider) {
 	client = NewHttpClient(provider)
 }
 
+func readError(resp *http.Response) error {
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var reqErr RequestError
+	err = json.Unmarshal(payload, &reqErr)
+	if err != nil {
+		reqErr.Code = resp.StatusCode
+		reqErr.Message = string(payload)
+	}
+
+	return &reqErr
+}
+
 // SearchPackages fetches packages matching a query from the TPIX server.
 // kind: "pkg", "template", or "all"
 // sort: "name", "updated", or "popularity" (default)
@@ -57,8 +73,7 @@ func SearchPackages(query, namespace string, kind string, category string, sort 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("search failed: %s", string(body))
+		return nil, fmt.Errorf("search failed: %w", readError(resp))
 	}
 
 	var result SearchResponse
@@ -81,8 +96,7 @@ func DownloadPackage(namespace, name, version string, cacheDir string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("download failed: %s", string(body))
+		return fmt.Errorf("download failed: %w", readError(resp))
 	}
 
 	// Create temp file for the archive
@@ -121,8 +135,7 @@ func FetchPackage(namespace, name string) (*PackageResponse, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get package: %s", string(body))
+		return nil, fmt.Errorf("failed to get package: %w", readError(resp))
 	}
 
 	var pkg PackageResponse
@@ -143,8 +156,7 @@ func FetchDependencies(namespace, name, version string) ([]DependencyInfo, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get dependencies: %s", string(body))
+		return nil, fmt.Errorf("failed to get dependencies: %w", readError(resp))
 	}
 
 	var depsResp DependenciesResponse
@@ -197,17 +209,12 @@ func UploadPackage(packagePath, namespace string) (*UploadResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("upload package failed: %w", readError(resp))
 	}
 
 	var uploadResp UploadResponse
-	if err := json.Unmarshal(body, &uploadResp); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&uploadResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -226,8 +233,7 @@ func QueryZoteroLibraries() ([]ZoteroLibrary, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch zotero libraries: %s", string(body))
+		return nil, fmt.Errorf("failed to fetch zotero libraries: %w", readError(resp))
 	}
 
 	var libraries []ZoteroLibrary
@@ -256,8 +262,7 @@ func CreateZoteroExport(target ZoteroExportTarget) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to create zotero exports: %s", string(body))
+		return "", fmt.Errorf("failed to create zotero exports: %w", readError(resp))
 	}
 
 	var exportResp struct {
@@ -278,17 +283,16 @@ func FetchLatestZoteroCollections(exportID string, writer io.Writer) error {
 
 	resp, err := client.MakeRequest("GET", path.String(), nil, "")
 	if err != nil {
-		return fmt.Errorf("failed to delete zotero export: %w", err)
+		return fmt.Errorf("failed to fetch zotero export: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to export zotero collections: %s", string(body))
+		return fmt.Errorf("failed to export zotero collections: %w", readError(resp))
 	}
 
 	_, err = io.Copy(writer, resp.Body)
-	return err
+	return fmt.Errorf("failed to read zotero export: %w", err)
 }
 
 func DeleteZoteroExport(exportID string) error {
@@ -301,8 +305,7 @@ func DeleteZoteroExport(exportID string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to delete zotero export: %s", string(body))
+		return fmt.Errorf("failed to delete zotero export: %w", readError(resp))
 	}
 
 	return nil
@@ -318,8 +321,7 @@ func GetUserProfile() (*UserProfile, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get user profile: %s", string(body))
+		return nil, fmt.Errorf("failed to get user profile: %w", readError(resp))
 	}
 
 	var profile UserProfile
@@ -340,8 +342,7 @@ func GetPackageIndex() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to get llm.txt: %s", string(body))
+		return "", fmt.Errorf("failed to get llm.txt: %w", readError(resp))
 	}
 
 	txt, err := io.ReadAll(resp.Body)

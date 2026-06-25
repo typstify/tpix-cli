@@ -3,8 +3,8 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -37,29 +37,28 @@ func PollForToken(deviceCode string, hostname string) (*TokenResponse, bool, err
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-
 	if resp.StatusCode == http.StatusOK {
 		var tokenResp TokenResponse
-		if err := json.Unmarshal(body, &tokenResp); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
 			return nil, false, err
 		}
 		return &tokenResp, false, nil
 	}
 
-	var errResp ErrorResponse
-	if err := json.Unmarshal(body, &errResp); err != nil {
-		return nil, false, err
+	var reqErr *RequestError
+	err = readError(resp)
+	if errors.As(err, &reqErr) {
+		switch reqErr.Message {
+		case "authorization_pending":
+			return nil, true, nil // Keep polling
+		case "access_denied":
+			return nil, false, fmt.Errorf("authorization denied by user")
+		case "expired_token":
+			return nil, false, fmt.Errorf("device code expired")
+		default:
+			return nil, false, fmt.Errorf("device token error: %w", reqErr)
+		}
 	}
 
-	switch errResp.Error {
-	case "authorization_pending":
-		return nil, true, nil // Keep polling
-	case "access_denied":
-		return nil, false, fmt.Errorf("authorization denied by user")
-	case "expired_token":
-		return nil, false, fmt.Errorf("device code expired")
-	default:
-		return nil, false, fmt.Errorf("error: %s", errResp.Description)
-	}
+	return nil, false, err
 }

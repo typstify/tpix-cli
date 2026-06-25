@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/typstify/tpix-cli/bundler"
@@ -82,12 +83,6 @@ type DependenciesResponse struct {
 	Dependencies []DependencyInfo `json:"dependencies"`
 }
 
-// ErrorResponse represents a standard error response
-type ErrorResponse struct {
-	Error       string `json:"error"`
-	Description string `json:"description"`
-}
-
 type DeviceCodeResponse struct {
 	DeviceCode      string `json:"device_code"`
 	UserCode        string `json:"user_code"`
@@ -149,4 +144,16 @@ type ZoteroExportTarget struct {
 	LibraryID     int64  `json:"library_id" binding:"required"`
 	CollectionKey string `json:"collection_key"`
 	Format        string `json:"format"`
+}
+
+var _ error = (*RequestError)(nil)
+
+type RequestError struct {
+	Code        int    `json:"-"`
+	Message     string `json:"error"`
+	Description string `json:"description"`
+}
+
+func (e *RequestError) Error() string {
+	return fmt.Sprintf("[RequestError] code: %d, message: %s", e.Code, e.Message)
 }
