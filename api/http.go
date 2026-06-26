@@ -31,10 +31,10 @@ func readError(resp *http.Response) error {
 	var reqErr RequestError
 	err = json.Unmarshal(payload, &reqErr)
 	if err != nil {
-		reqErr.Code = resp.StatusCode
 		reqErr.Message = string(payload)
 	}
 
+	reqErr.Code = resp.StatusCode
 	return &reqErr
 }
 
