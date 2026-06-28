@@ -292,7 +292,11 @@ func FetchLatestZoteroCollections(exportID string, writer io.Writer) error {
 	}
 
 	_, err = io.Copy(writer, resp.Body)
-	return fmt.Errorf("failed to read zotero export: %w", err)
+	if err != nil {
+		return fmt.Errorf("failed to read zotero export: %w", err)
+	}
+
+	return nil
 }
 
 func DeleteZoteroExport(exportID string) error {
