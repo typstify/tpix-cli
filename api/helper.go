@@ -3,10 +3,13 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/typstify/tpix-cli/config"
 	"github.com/typstify/tpix-cli/version"
@@ -18,6 +21,7 @@ const (
 
 var (
 	TpixClientUserAgent = fmt.Sprintf("tpix-client/%s", version.Version)
+	MaxRetries          = 5
 )
 
 type CredentialsProvider interface {
@@ -55,7 +59,7 @@ func (c *HttpClient) MakeRequest(method, url string, body io.Reader, contentType
 		return nil, err
 	}
 
-	resp, err := c.doRequest(method, url, bodyBytes, contentType, cred.AccessToken)
+	resp, err := c.doRequestWithRetry(method, url, bodyBytes, contentType, cred.AccessToken)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +67,7 @@ func (c *HttpClient) MakeRequest(method, url string, body io.Reader, contentType
 	// If 401 and we have a refresh token, try to refresh and retry
 	if resp.StatusCode == http.StatusUnauthorized && cred.RefreshToken != "" {
 		resp.Body.Close()
-		refreshErr := c.refreshAccessToken(cred)
+		refreshErr := c.refreshAccessToken()
 		if refreshErr != nil {
 			return nil, refreshErr
 		}
@@ -74,7 +78,7 @@ func (c *HttpClient) MakeRequest(method, url string, body io.Reader, contentType
 			return nil, err
 		}
 
-		return c.doRequest(method, url, bodyBytes, contentType, cfg.AccessToken)
+		return c.doRequestWithRetry(method, url, bodyBytes, contentType, cfg.AccessToken)
 	}
 
 	return resp, nil
@@ -108,24 +112,32 @@ func (c *HttpClient) doRequest(method, url string, bodyBytes []byte, contentType
 
 // refreshAccessToken uses the stored refresh token to obtain a new access token.
 // On success, it updates the config with both new tokens and persists them.
-func (c *HttpClient) refreshAccessToken(cred config.Credentials) error {
+func (c *HttpClient) refreshAccessToken() error {
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
+
+	cred, err := c.cred.Load()
+	if err != nil {
+		return err
+	}
 
 	reqBody, _ := json.Marshal(map[string]string{
 		"refresh_token": cred.RefreshToken,
 	})
 
-	resp, err := c.doRequest("POST", "/auth/token/refresh", reqBody, "application/json", "")
+	resp, err := c.doRequestWithRetry("POST", "/auth/token/refresh", reqBody, "application/json", "")
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Refresh failed — clear refresh token so we don't keep retrying
-		cred.RefreshToken = ""
-		c.cred.Save(cred)
+		if resp.StatusCode == http.StatusUnauthorized {
+			// Invalid refresh token — clear refresh token so we don't keep retrying
+			cred.RefreshToken = ""
+			c.cred.Save(cred)
+		}
+
 		return fmt.Errorf("token refresh failed with status %d", resp.StatusCode)
 	}
 
@@ -140,4 +152,30 @@ func (c *HttpClient) refreshAccessToken(cred config.Credentials) error {
 	}
 
 	return c.cred.Save(cred)
+}
+
+func (c *HttpClient) doRequestWithRetry(method, url string, bodyBytes []byte, contentType string, accessToken string) (*http.Response, error) {
+	retries := 0
+
+	for retries < MaxRetries {
+		waitTimeInMillis := int((math.Pow(2, float64(retries)) - 1) * 100)
+		time.Sleep(time.Millisecond * time.Duration(waitTimeInMillis))
+
+		resp, err := c.doRequest(method, url, bodyBytes, contentType, accessToken)
+		if err != nil {
+			return nil, err
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK, http.StatusAccepted:
+			return resp, nil
+		case http.StatusTooManyRequests, http.StatusGatewayTimeout, http.StatusRequestTimeout:
+			resp.Body.Close()
+			retries++
+		default:
+			return resp, nil
+		}
+	}
+
+	return nil, errors.New("too many failure retries")
 }
