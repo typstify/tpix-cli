@@ -1,9 +1,11 @@
-package config
+package main
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/typstify/tpix-cli/config"
 )
 
 func TestLoadEmptyConfig(t *testing.T) {
@@ -13,7 +15,9 @@ func TestLoadEmptyConfig(t *testing.T) {
 	configDir = tmpDir
 	defer func() { configDir = origConfigDir }()
 
-	cfg, err := Load()
+	cm := CliConfigManager{}
+
+	cfg, err := cm.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -37,7 +41,8 @@ func TestLoadWithSavedPath(t *testing.T) {
 	configPath := filepath.Join(tmpDir, configFilename)
 	os.WriteFile(configPath, []byte(`{"typstCachePkgPath":"`+savedPath+`"}`), 0644)
 
-	cfg, err := Load()
+	cm := CliConfigManager{}
+	cfg, err := cm.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -57,7 +62,8 @@ func TestLoadWithEnvVar(t *testing.T) {
 	os.MkdirAll(envPath, 0755)
 	t.Setenv(cachePathEnv, envPath)
 
-	cfg, err := Load()
+	cm := CliConfigManager{}
+	cfg, err := cm.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -76,7 +82,8 @@ func TestLoadWithInvalidEnvVar(t *testing.T) {
 
 	t.Setenv(cachePathEnv, "/nonexistent/path")
 
-	_, err := Load()
+	cm := CliConfigManager{}
+	_, err := cm.Load()
 	if err == nil {
 		t.Error("Load() expected error for invalid env var")
 	}
@@ -88,16 +95,18 @@ func TestSaveAndLoad(t *testing.T) {
 	configDir = tmpDir
 	defer func() { configDir = origConfigDir }()
 
-	cfg := Config{
+	cfg := config.Config{
 		TypstCachePkgPath: filepath.Join(tmpDir, "saved-cache"),
 	}
 
-	err := Save(cfg)
+	cm := CliConfigManager{}
+
+	err := cm.Save(cfg)
 	if err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	loadedCfg, err := Load()
+	loadedCfg, err := cm.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -113,16 +122,18 @@ func TestSaveEmptyPath(t *testing.T) {
 	configDir = tmpDir
 	defer func() { configDir = origConfigDir }()
 
-	cfg := Config{
+	cfg := config.Config{
 		TypstCachePkgPath: "",
 	}
 
-	err := Save(cfg)
+	cm := CliConfigManager{}
+
+	err := cm.Save(cfg)
 	if err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	loadedCfg, err := Load()
+	loadedCfg, err := cm.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

@@ -1,4 +1,4 @@
-package cli
+package tpix
 
 import (
 	"fmt"
@@ -6,22 +6,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/typstify/tpix-cli/api"
 	"github.com/typstify/tpix-cli/bundler"
 	"github.com/typstify/tpix-cli/deps"
-	"github.com/typstify/tpix-cli/utils"
-)
-
-const (
-	pollInterval = 5 * time.Second
 )
 
 type ReportFunc func(message string)
 
 // ZoteroLibrary represents a Zotero library.
 type ZoteroLibrary = api.ZoteroLibrary
+
+type TpixSdk struct {
+	client *api.ApiClient
+	// output reporter
+	reporter ReportFunc
+}
+
+func NewTpixSdk(httpClient *api.HttpClient) *TpixSdk {
+	return &TpixSdk{
+		client: api.NewApiClient(httpClient),
+	}
+}
 
 // Helper functions
 
@@ -52,9 +58,13 @@ func isPackageCached(cacheDir, namespace, name, version string) bool {
 	return err == nil && info.IsDir()
 }
 
+func (t *TpixSdk) WithReporter(reporter ReportFunc) {
+	t.reporter = reporter
+}
+
 // fetchWithDeps downloads a package and its transitive dependencies.
 // visited tracks already-processed packages to prevent infinite loops.
-func fetchWithDeps(namespace, name, version, cacheDir string, visited map[string]bool, noDeps bool, reporter ReportFunc) error {
+func (t *TpixSdk) fetchWithDeps(namespace, name, version, cacheDir string, visited map[string]bool, noDeps bool) error {
 	key := fmt.Sprintf("@%s/%s:%s", namespace, name, version)
 	if visited[key] {
 		return nil
@@ -62,15 +72,15 @@ func fetchWithDeps(namespace, name, version, cacheDir string, visited map[string
 	visited[key] = true
 
 	if isPackageCached(cacheDir, namespace, name, version) {
-		if reporter != nil {
-			reporter(fmt.Sprintf("  Already cached: %s\n", key))
+		if t.reporter != nil {
+			t.reporter(fmt.Sprintf("  Already cached: %s\n", key))
 		}
 		// Do not return early, check if dependencies are satisfied.
 	} else {
-		if reporter != nil {
-			reporter(fmt.Sprintf("  Downloading %s...\n", key))
+		if t.reporter != nil {
+			t.reporter(fmt.Sprintf("  Downloading %s...\n", key))
 		}
-		if err := api.DownloadPackage(namespace, name, version, cacheDir); err != nil {
+		if err := t.client.DownloadPackage(namespace, name, version, cacheDir); err != nil {
 			return fmt.Errorf("failed to download %s: %w", key, err)
 		}
 	}
@@ -80,14 +90,14 @@ func fetchWithDeps(namespace, name, version, cacheDir string, visited map[string
 	}
 
 	// Fetch and resolve transitive dependencies
-	depInfos, err := api.FetchDependencies(namespace, name, version)
+	depInfos, err := t.client.FetchDependencies(namespace, name, version)
 	if err != nil {
 		// Non-fatal: the server may not have dependency data for older packages
 		return nil
 	}
 
 	for _, dep := range depInfos {
-		if err := fetchWithDeps(dep.Namespace, dep.Name, dep.Version, cacheDir, visited, false, reporter); err != nil {
+		if err := t.fetchWithDeps(dep.Namespace, dep.Name, dep.Version, cacheDir, visited, false); err != nil {
 			return err
 		}
 	}
@@ -95,65 +105,25 @@ func fetchWithDeps(namespace, name, version, cacheDir string, visited map[string
 	return nil
 }
 
-func StartLogin() (*api.DeviceCodeResponse, error) {
-	deviceResp, err := api.StartDeviceLogin()
-	if err != nil {
-		return nil, err
-	}
-
-	verifyUrl := deviceResp.VerificationURI + "?user_code=" + deviceResp.UserCode
-	// open the url for user
-	utils.OpenURL(verifyUrl)
-
-	return deviceResp, nil
-}
-
-func PollLoginResult(deviceCode string, expiresIn int, reporter ReportFunc) (*api.TokenResponse, error) {
-	timeout := time.After(time.Duration(expiresIn) * time.Second)
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	hostname, _ := os.Hostname()
-
-	for {
-		select {
-		case <-timeout:
-			return nil, fmt.Errorf("device code expired, please try again.")
-		case <-ticker.C:
-			tokenResp, pending, err := api.PollForToken(deviceCode, hostname)
-			if err != nil {
-				return nil, err
-			}
-			if !pending {
-				return tokenResp, nil
-			}
-
-			if reporter != nil {
-				fmt.Print(".")
-			}
-		}
-	}
-}
-
 // SearchPackages searches Typst packages from TPIX server.
-func SearchPackages(namespace string, query string, kind string, category string, sort string, limit int) (*api.SearchResponse, error) {
+func (t *TpixSdk) SearchPackages(namespace string, query string, kind string, category string, sort string, limit int) (*api.SearchResponse, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 
-	return api.SearchPackages(query, namespace, kind, category, sort, limit)
+	return t.client.SearchPackages(query, namespace, kind, category, sort, limit)
 }
 
 // DownloadPackage download Typst packages from TPIX server.
 // pkgSpec should follow the pattern:  @namespace/name:version. Refer to [parsePkgSpec] to know details.
 // If noDeps is true, it will skip fetching transitive dependencies.
-func DownloadPackage(pkgSpec string, cacheDir string, noDeps bool, reporter ReportFunc) (string, int, error) {
+func (t *TpixSdk) DownloadPackage(pkgSpec string, cacheDir string, noDeps bool) (string, int, error) {
 	// Parse namespace/name:version
 	namespace, name, version := ParsePkgSpec(pkgSpec)
 
 	if version == "" {
 		// Get latest version first
-		pkg, err := api.FetchPackage(namespace, name)
+		pkg, err := t.client.FetchPackage(namespace, name)
 		if err != nil {
 			return "", 0, err
 		}
@@ -167,31 +137,31 @@ func DownloadPackage(pkgSpec string, cacheDir string, noDeps bool, reporter Repo
 		return "", 0, fmt.Errorf("typst cache directory not configured")
 	}
 
-	if reporter != nil {
-		reporter(fmt.Sprintf("Resolving @%s/%s:%s...\n", namespace, name, version))
+	if t.reporter != nil {
+		t.reporter(fmt.Sprintf("Resolving @%s/%s:%s...\n", namespace, name, version))
 	}
 
 	visited := make(map[string]bool)
-	if err := fetchWithDeps(namespace, name, version, cacheDir, visited, noDeps, reporter); err != nil {
+	if err := t.fetchWithDeps(namespace, name, version, cacheDir, visited, noDeps); err != nil {
 		return "", 0, err
 	}
 
-	if reporter != nil {
-		reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(visited)))
+	if t.reporter != nil {
+		t.reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(visited)))
 	}
 
 	pkgPath := filepath.Join(cacheDir, namespace, name, version)
 	return pkgPath, len(visited), nil
 }
 
-func DownloadProjectDependencies(projectDir string, cacheDir string, dryRun bool, reporter ReportFunc) error {
+func (t *TpixSdk) DownloadProjectDependencies(projectDir string, cacheDir string, dryRun bool) error {
 	// Scan project directory for .typ imports
 	if projectDir == "" {
 		return fmt.Errorf("invalid working directory: %s", projectDir)
 	}
 
-	if reporter != nil {
-		reporter(fmt.Sprintf("Scanning %s for package imports...\n", projectDir))
+	if t.reporter != nil {
+		t.reporter(fmt.Sprintf("Scanning %s for package imports...\n", projectDir))
 	}
 
 	discovered, err := deps.ExtractFromDirectory(projectDir)
@@ -200,14 +170,14 @@ func DownloadProjectDependencies(projectDir string, cacheDir string, dryRun bool
 	}
 
 	if len(discovered) == 0 {
-		if reporter != nil {
-			reporter(fmt.Sprintln("No package imports found."))
+		if t.reporter != nil {
+			t.reporter(fmt.Sprintln("No package imports found."))
 		}
 		return nil
 	}
 
-	if reporter != nil {
-		reporter(fmt.Sprintf("Found %d direct dependency(ies).\n", len(discovered)))
+	if t.reporter != nil {
+		t.reporter(fmt.Sprintf("Found %d direct dependency(ies).\n", len(discovered)))
 	}
 
 	if dryRun {
@@ -218,8 +188,8 @@ func DownloadProjectDependencies(projectDir string, cacheDir string, dryRun bool
 				status = "cached"
 			}
 
-			if reporter != nil {
-				reporter(fmt.Sprintf("  %s [%s]\n", dep.Key(), status))
+			if t.reporter != nil {
+				t.reporter(fmt.Sprintf("  %s [%s]\n", dep.Key(), status))
 			}
 		}
 		return nil
@@ -227,23 +197,23 @@ func DownloadProjectDependencies(projectDir string, cacheDir string, dryRun bool
 
 	visited := make(map[string]bool)
 	for _, dep := range discovered {
-		if err := fetchWithDeps(dep.Namespace, dep.Name, dep.Version, cacheDir, visited, false, reporter); err != nil {
+		if err := t.fetchWithDeps(dep.Namespace, dep.Name, dep.Version, cacheDir, visited, false); err != nil {
 			return err
 		}
 	}
 
-	if reporter != nil {
-		reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(visited)))
+	if t.reporter != nil {
+		t.reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(visited)))
 	}
 
 	return nil
 }
 
-func QueryPackage(pkgSpec string) (*api.PackageResponse, error) {
+func (t *TpixSdk) QueryPackage(pkgSpec string) (*api.PackageResponse, error) {
 	// Parse namespace/name
 	namespace, name, _ := ParsePkgSpec(pkgSpec)
 
-	pkg, err := api.FetchPackage(namespace, name)
+	pkg, err := t.client.FetchPackage(namespace, name)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +222,7 @@ func QueryPackage(pkgSpec string) (*api.PackageResponse, error) {
 
 }
 
-func BundlePackage(srcDir string, outputFile string, excludedFiles []string) (string, error) {
+func (t *TpixSdk) BundlePackage(srcDir string, outputFile string, excludedFiles []string) (string, error) {
 	srcDir, err := filepath.Abs(srcDir)
 	if err != nil {
 		return "", err
@@ -288,7 +258,7 @@ func BundlePackage(srcDir string, outputFile string, excludedFiles []string) (st
 	return outputFile, nil
 }
 
-func PushPackage(packagePath string, namespace string, reporter ReportFunc) error {
+func (t *TpixSdk) PushPackage(packagePath string, namespace string) error {
 	// Check if file exists
 	info, err := os.Stat(packagePath)
 	if err != nil {
@@ -298,25 +268,25 @@ func PushPackage(packagePath string, namespace string, reporter ReportFunc) erro
 		return fmt.Errorf("%s is a directory, not a package file", packagePath)
 	}
 
-	if reporter != nil {
-		reporter(fmt.Sprintf("Uploading %s to namespace %s...\n", packagePath, namespace))
+	if t.reporter != nil {
+		t.reporter(fmt.Sprintf("Uploading %s to namespace %s...\n", packagePath, namespace))
 	}
 
-	resp, err := api.UploadPackage(packagePath, namespace)
+	resp, err := t.client.UploadPackage(packagePath, namespace)
 	if err != nil {
 		return fmt.Errorf("upload failed: %w", err)
 	}
 
 	if resp.SHA256 != "" {
-		if reporter != nil {
-			reporter(fmt.Sprintf("Successfully uploaded package: @%s/%s:%s\n", namespace, resp.Package, resp.Version))
+		if t.reporter != nil {
+			t.reporter(fmt.Sprintf("Successfully uploaded package: @%s/%s:%s\n", namespace, resp.Package, resp.Version))
 		}
 	} else {
-		if reporter != nil {
-			reporter("Upload failed, report: \n")
+		if t.reporter != nil {
+			t.reporter("Upload failed, report: \n")
 
 			for _, r := range resp.ValidateReport {
-				reporter(fmt.Sprintf("\t%s\n", r))
+				t.reporter(fmt.Sprintf("\t%s\n", r))
 			}
 		}
 	}
@@ -325,17 +295,17 @@ func PushPackage(packagePath string, namespace string, reporter ReportFunc) erro
 }
 
 // GetUserProfile queries the user profile from TPIX server.
-func GetUserProfile() (*api.UserProfile, error) {
-	return api.GetUserProfile()
+func (t *TpixSdk) GetUserProfile() (*api.UserProfile, error) {
+	return t.client.GetUserProfile()
 }
 
 // ListZoteroLibraries returns the list of Zotero libraries accessible to the user.
-func ListZoteroLibraries() ([]api.ZoteroLibrary, error) {
-	return api.QueryZoteroLibraries()
+func (t *TpixSdk) ListZoteroLibraries() ([]api.ZoteroLibrary, error) {
+	return t.client.QueryZoteroLibraries()
 }
 
 // CreateZoteroExport creates an export target on the TPIX server.
-func CreateZoteroExport(name string, namespaceID string, libraryType string, libraryID int64, collectionKey string, format string, reporter ReportFunc) (string, error) {
+func (t *TpixSdk) CreateZoteroExport(name string, namespaceID string, libraryType string, libraryID int64, collectionKey string, format string) (string, error) {
 	target := api.ZoteroExportTarget{
 		NamespaceID:   namespaceID,
 		Name:          name,
@@ -345,39 +315,39 @@ func CreateZoteroExport(name string, namespaceID string, libraryType string, lib
 		Format:        format,
 	}
 
-	if reporter != nil {
-		reporter(fmt.Sprintf("Creating export for library %s:%d, collection %s...\n", libraryType, libraryID, collectionKey))
+	if t.reporter != nil {
+		t.reporter(fmt.Sprintf("Creating export for library %s:%d, collection %s...\n", libraryType, libraryID, collectionKey))
 	}
 
-	exportID, err := api.CreateZoteroExport(target)
+	exportID, err := t.client.CreateZoteroExport(target)
 	if err != nil {
 		return "", fmt.Errorf("failed to create export: %w", err)
 	}
 
-	if reporter != nil {
-		reporter(fmt.Sprintf("Export created: %s\n", exportID))
+	if t.reporter != nil {
+		t.reporter(fmt.Sprintf("Export created: %s\n", exportID))
 	}
 
 	return exportID, nil
 }
 
 // FetchZoteroExport fetches the content of a Zotero export.
-func FetchZoteroExport(exportID string, writer io.Writer) error {
-	return api.FetchLatestZoteroCollections(exportID, writer)
+func (t *TpixSdk) FetchZoteroExport(exportID string, writer io.Writer) error {
+	return t.client.FetchLatestZoteroCollections(exportID, writer)
 }
 
 // DeleteZoteroExport deletes an existing Zotero export.
-func DeleteZoteroExport(exportID string, reporter ReportFunc) error {
-	if reporter != nil {
-		reporter(fmt.Sprintf("Deleting export %s...\n", exportID))
+func (t *TpixSdk) DeleteZoteroExport(exportID string) error {
+	if t.reporter != nil {
+		t.reporter(fmt.Sprintf("Deleting export %s...\n", exportID))
 	}
 
-	if err := api.DeleteZoteroExport(exportID); err != nil {
+	if err := t.client.DeleteZoteroExport(exportID); err != nil {
 		return fmt.Errorf("failed to delete export: %w", err)
 	}
 
-	if reporter != nil {
-		reporter("Export deleted.\n")
+	if t.reporter != nil {
+		t.reporter("Export deleted.\n")
 	}
 
 	return nil
@@ -385,6 +355,6 @@ func DeleteZoteroExport(exportID string, reporter ReportFunc) error {
 
 // ListLLMAccesiblePackages retrieves a markdown file containing all user
 // accessible package/template metadata. This API is dedicated for LLM use.
-func GetPackageIndex() (string, error) {
-	return api.GetPackageIndex()
+func (t *TpixSdk) GetPackageIndex() (string, error) {
+	return t.client.GetPackageIndex()
 }

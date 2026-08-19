@@ -83,26 +83,11 @@ type DependenciesResponse struct {
 	Dependencies []DependencyInfo `json:"dependencies"`
 }
 
-type DeviceCodeResponse struct {
-	DeviceCode      string `json:"device_code"`
-	UserCode        string `json:"user_code"`
-	VerificationURI string `json:"verification_uri"`
-	ExpiresIn       int    `json:"expires_in"`
-}
-
-type TokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int    `json:"expires_in"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-}
-
 type UserProfile struct {
 	Email      string          `json:"email"`
 	Username   string          `json:"username"`
 	CreatedAt  time.Time       `json:"created_at"`
 	Namespaces []UserNamespace `json:"namespaces"`
-	Subscribed bool            `json:"subscribed"`
 }
 
 type UserNamespace struct {

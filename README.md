@@ -34,7 +34,7 @@ The binary will be built as `tpix` and installed in `/usr/local/bin/` in Linux a
 
 ```bash
 # Login to TPIX server
-tpix login
+tpix login -k api-key-xxxx
 
 # Search for packages
 tpix search "chart"
@@ -54,7 +54,7 @@ tpix info @namespace/package-name
 tpix login
 ```
 
-Login using OAuth 2.0 device flow. Required for uploading packages.
+Login using api key issued by the TPIX server.
 
 ### Configuration
 

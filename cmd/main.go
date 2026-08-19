@@ -2,8 +2,8 @@ package main
 
 import (
 	"github.com/spf13/cobra"
+	"github.com/typstify/tpix-cli"
 	"github.com/typstify/tpix-cli/api"
-	"github.com/typstify/tpix-cli/config"
 )
 
 var (
@@ -11,13 +11,24 @@ var (
 		Use:   "tpix",
 		Short: "A tpix command line client used to manage Typst packages",
 	}
+
+	cm  *CliConfigManager
+	sdk *tpix.TpixSdk
 )
 
 func main() {
 	// Load config on startup
-	config.Load()
+	cm = &CliConfigManager{}
+	cfg, err := cm.Load()
+	if err != nil {
+		panic(err)
+	}
 
-	api.Init(config.CliCredentialProvider{})
+	if cfg.ApiKey != "" {
+		httpClient := api.NewHttpClient(cfg.ApiKey)
+		sdk = tpix.NewTpixSdk(httpClient)
+		sdk.WithReporter(cmdReporter)
+	}
 
 	//rootCmd.PersistentFlags().StringVar(&tpixServer, "server", tpixServer, "TPIX server URL")
 

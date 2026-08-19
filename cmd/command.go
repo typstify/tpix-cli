@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 	cli "github.com/typstify/tpix-cli"
-	"github.com/typstify/tpix-cli/config"
 	"github.com/typstify/tpix-cli/version"
 )
 
@@ -19,44 +18,33 @@ var cmdReporter = func(msg string) {
 }
 
 func loginCmd() *cobra.Command {
+	var apiKey string
+
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Login the tpix server",
-		Long:  "Login the tpix server. User is required to login for all other operations",
+		Long:  "Login the tpix server with an API key issued by https://tpix.typstify.com",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			deviceResp, err := cli.StartLogin()
-			if err != nil {
-				fmt.Printf("Login failed: %v\n", err)
-				return err
+			key := strings.TrimSpace(apiKey)
+			if key == "" {
+				return errors.New("missing api key")
 			}
 
-			// Display instructions to user
-			cmdReporter("=== Device Authorization ===\n")
-			cmdReporter(fmt.Sprintf("Visit: %s\n", deviceResp.VerificationURI))
-			cmdReporter(fmt.Sprintf("Enter code: %s\n", deviceResp.UserCode))
-			cmdReporter(fmt.Sprintf("Code expires in %d seconds\n", deviceResp.ExpiresIn))
-			cmdReporter("If the browser does not open, please open the above URL manually.")
-
-			tokenResp, err := cli.PollLoginResult(deviceResp.DeviceCode, deviceResp.ExpiresIn, cmdReporter)
-			if err != nil {
-				fmt.Printf("Login failed: %v\n", err)
-				return err
-			}
-
-			cfg, err := config.Load()
+			cfg, err := cm.Load()
 			if err != nil {
 				return err
 			}
+			cfg.ApiKey = key
 
-			cfg.AccessToken = tokenResp.AccessToken
-			cfg.RefreshToken = tokenResp.RefreshToken
-			config.Save(cfg)
-			cmdReporter("\n\nSuccess! Access token saved\n")
+			cm.Save(cfg)
+			cmdReporter("Success! API key saved.\n")
 
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVarP(&apiKey, "apiKey", "k", "", " API key issued by https://tpix.typstify.com")
 
 	return cmd
 }
@@ -80,7 +68,7 @@ func searchPkgCmd() *cobra.Command {
 				return errors.New("missing query")
 			}
 
-			result, err := cli.SearchPackages(namespace, query, kind, category, sort, limit)
+			result, err := sdk.SearchPackages(namespace, query, kind, category, sort, limit)
 			if err != nil {
 				fmt.Printf("failed to search packages: %v", err)
 				return nil
@@ -133,7 +121,7 @@ func getPkgCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgSpec := args[0]
 
-			cfg, err := config.Load()
+			cfg, err := cm.Load()
 			if err != nil {
 				return err
 			}
@@ -142,7 +130,7 @@ func getPkgCmd() *cobra.Command {
 				return fmt.Errorf("typst cache directory not configured")
 			}
 
-			_, _, err = cli.DownloadPackage(pkgSpec, cacheDir, noDeps, cmdReporter)
+			_, _, err = sdk.DownloadPackage(pkgSpec, cacheDir, noDeps)
 			return err
 		},
 	}
@@ -166,7 +154,7 @@ along with its transitive dependencies.
 Use --dry-run to see what would be fetched without downloading anything.`,
 		Args: cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load()
+			cfg, err := cm.Load()
 			if err != nil {
 				return err
 			}
@@ -181,7 +169,7 @@ Use --dry-run to see what would be fetched without downloading anything.`,
 				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
-			return cli.DownloadProjectDependencies(cwd, cacheDir, dryRun, cmdReporter)
+			return sdk.DownloadProjectDependencies(cwd, cacheDir, dryRun)
 		},
 	}
 
@@ -198,7 +186,7 @@ func listCachedCmd() *cobra.Command {
 		Long:  "List all packages downloaded and cached in the local package cache",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load()
+			cfg, err := cm.Load()
 			if err != nil {
 				return err
 			}
@@ -268,7 +256,7 @@ func removeCachedCmd() *cobra.Command {
 				return fmt.Errorf("invalid package spec: use format @namespace/name:version")
 			}
 
-			cfg, err := config.Load()
+			cfg, err := cm.Load()
 			if err != nil {
 				return fmt.Errorf("typst cache directory not configured")
 			}
@@ -313,7 +301,7 @@ func queryPkgCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgSpec := args[0]
 
-			pkg, err := cli.QueryPackage(pkgSpec)
+			pkg, err := sdk.QueryPackage(pkgSpec)
 			if err != nil {
 				return err
 			}
@@ -368,7 +356,7 @@ Files and directories can be excluded using the --exclude flag or the exclude fi
 		RunE: func(cmd *cobra.Command, args []string) error {
 			srcDir := args[0]
 
-			finalPath, err := cli.BundlePackage(srcDir, output, exclude)
+			finalPath, err := sdk.BundlePackage(srcDir, output, exclude)
 			if err != nil {
 				return err
 			}
@@ -396,7 +384,7 @@ The package must be a valid Typst package archive created with the bundle comman
 			packagePath := args[0]
 			namespace := args[1]
 
-			return cli.PushPackage(packagePath, namespace, cmdReporter)
+			return sdk.PushPackage(packagePath, namespace)
 		},
 	}
 
@@ -514,7 +502,7 @@ If neither is set, the default path is used:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flagSet := cmd.Flags().Changed("set")
 
-			cfg, err := config.Load()
+			cfg, err := cm.Load()
 			if err != nil {
 				return err
 			}
@@ -524,10 +512,10 @@ If neither is set, the default path is used:
 				if setPath == "" {
 					// Empty string - clear and let Save() use detected default
 					cfg.TypstCachePkgPath = ""
-					if err := config.Save(cfg); err != nil {
+					if err := cm.Save(cfg); err != nil {
 						return fmt.Errorf("failed to save config: %w", err)
 					}
-					cfg, _ = config.Load()
+					cfg, _ = cm.Load()
 
 					fmt.Printf("Cache path reset to: %s\n", cfg.TypstCachePkgPath)
 					return nil
@@ -546,10 +534,10 @@ If neither is set, the default path is used:
 				}
 
 				cfg.TypstCachePkgPath = setPath
-				if err := config.Save(cfg); err != nil {
+				if err := cm.Save(cfg); err != nil {
 					return fmt.Errorf("failed to save config: %w", err)
 				}
-				cfg, _ = config.Load()
+				cfg, _ = cm.Load()
 
 				fmt.Printf("Cache path set to: %s\n", cfg.TypstCachePkgPath)
 				return nil
@@ -592,7 +580,7 @@ func zoteroListCmd() *cobra.Command {
 		Long:  "List Zotero libraries the user has access to",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			libraries, err := cli.ListZoteroLibraries()
+			libraries, err := sdk.ListZoteroLibraries()
 			if err != nil {
 				return fmt.Errorf("failed to list libraries: %w", err)
 			}
@@ -648,7 +636,7 @@ Interactive mode: run without flags to select library and collection.`,
 
 			// If library ID provided, use it directly
 			if libraryID > 0 {
-				libraries, err := cli.ListZoteroLibraries()
+				libraries, err := sdk.ListZoteroLibraries()
 				if err != nil {
 					return fmt.Errorf("failed to list libraries: %w", err)
 				}
@@ -664,7 +652,7 @@ Interactive mode: run without flags to select library and collection.`,
 				}
 			} else {
 				// Interactive selection
-				libraries, err := cli.ListZoteroLibraries()
+				libraries, err := sdk.ListZoteroLibraries()
 				if err != nil {
 					return fmt.Errorf("failed to list libraries: %w", err)
 				}
@@ -729,7 +717,7 @@ Interactive mode: run without flags to select library and collection.`,
 			// Generate a name for the export
 			exportName := fmt.Sprintf("export-%s", targetLib.Library.Name)
 
-			exportID, err := cli.CreateZoteroExport(exportName, targetLib.NamespaceID, libraryType, int64(targetLib.Library.ID), targetCol, format, cmdReporter)
+			exportID, err := sdk.CreateZoteroExport(exportName, targetLib.NamespaceID, libraryType, int64(targetLib.Library.ID), targetCol, format)
 			if err != nil {
 				return fmt.Errorf("failed to create export: %w", err)
 			}
@@ -747,12 +735,12 @@ Interactive mode: run without flags to select library and collection.`,
 				writer = os.Stdout
 			}
 
-			if err := cli.FetchZoteroExport(exportID, writer); err != nil {
+			if err := sdk.FetchZoteroExport(exportID, writer); err != nil {
 				return fmt.Errorf("failed to fetch export: %w", err)
 			}
 
 			// Clean up the export target (treat as ephemeral in tpix-cli)
-			if err := cli.DeleteZoteroExport(exportID, nil); err != nil {
+			if err := sdk.DeleteZoteroExport(exportID); err != nil {
 				// Non-fatal, just warn
 				fmt.Fprintf(os.Stderr, "Warning: failed to clean up export: %v\n", err)
 			}
@@ -779,7 +767,7 @@ func zoteroDeleteCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			exportID := args[0]
 
-			if err := cli.DeleteZoteroExport(exportID, cmdReporter); err != nil {
+			if err := sdk.DeleteZoteroExport(exportID); err != nil {
 				return fmt.Errorf("failed to delete export: %w", err)
 			}
 
