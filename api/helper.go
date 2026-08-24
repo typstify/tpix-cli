@@ -20,14 +20,18 @@ var (
 	TpixClientUserAgent = fmt.Sprintf("tpix-client/%s", version.Version)
 )
 
-type HttpClient struct {
-	apiKey   string
-	maxRetry int
+type ApiKeyProvider interface {
+	Get() string
 }
 
-func NewHttpClient(apiKey string) *HttpClient {
+type HttpClient struct {
+	apiKeyProvider ApiKeyProvider
+	maxRetry       int
+}
+
+func NewHttpClient(provider ApiKeyProvider) *HttpClient {
 	return &HttpClient{
-		apiKey: apiKey,
+		apiKeyProvider: provider,
 		// max retry after request failed for some reason
 		maxRetry: 5,
 	}
@@ -71,8 +75,8 @@ func (c *HttpClient) doRequest(method, url string, bodyBytes []byte, contentType
 		return nil, err
 	}
 
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if c.apiKeyProvider != nil {
+		req.Header.Set("Authorization", "Bearer "+c.apiKeyProvider.Get())
 	}
 
 	req.Header.Set("User-Agent", TpixClientUserAgent)

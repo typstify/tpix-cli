@@ -1,7 +1,5 @@
 package config
 
-
-
 type Credentials struct {
 	ApiKey string `json:"apiKey"`
 }

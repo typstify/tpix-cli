@@ -25,7 +25,7 @@ func main() {
 	}
 
 	if cfg.ApiKey != "" {
-		httpClient := api.NewHttpClient(cfg.ApiKey)
+		httpClient := api.NewHttpClient(cm)
 		sdk = tpix.NewTpixSdk(httpClient)
 		sdk.WithReporter(cmdReporter)
 	}

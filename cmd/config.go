@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/typstify/tpix-cli/api"
 	"github.com/typstify/tpix-cli/config"
 )
 
@@ -165,4 +166,15 @@ func (c *CliConfigManager) Save(cfg config.Config) error {
 
 	c.cfg = cfg
 	return nil
+}
+
+var _ api.ApiKeyProvider = (*CliConfigManager)(nil)
+
+func (c *CliConfigManager) Get() string {
+	cfg, err := c.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	return cfg.ApiKey
 }
