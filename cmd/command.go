@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	cli "github.com/typstify/tpix-cli"
+	"github.com/typstify/tpix-cli/deps"
 	"github.com/typstify/tpix-cli/version"
 )
 
@@ -130,7 +131,7 @@ func getPkgCmd() *cobra.Command {
 				return fmt.Errorf("typst cache directory not configured")
 			}
 
-			_, _, err = sdk.DownloadPackage(pkgSpec, cacheDir, noDeps)
+			_, err = sdk.DownloadPackage(pkgSpec, cacheDir, noDeps)
 			return err
 		},
 	}
@@ -249,10 +250,9 @@ func removeCachedCmd() *cobra.Command {
 		Long:  "Remove a locally cached package from the cache directory",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pkgSpec := args[0]
-			namespace, name, version := cli.ParsePkgSpec(pkgSpec)
+			pkgSpec := deps.ParseDependency(args[0])
 
-			if namespace == "" || name == "" || version == "" {
+			if pkgSpec.Partial() {
 				return fmt.Errorf("invalid package spec: use format @namespace/name:version")
 			}
 
@@ -266,25 +266,25 @@ func removeCachedCmd() *cobra.Command {
 				return fmt.Errorf("typst cache directory not configured")
 			}
 
-			pkgDir := filepath.Join(cacheDir, namespace, name, version)
+			pkgDir := filepath.Join(cacheDir, pkgSpec.RelPath())
 
 			// Check if the package exists
 			info, err := os.Stat(pkgDir)
 			if err != nil {
 				if os.IsNotExist(err) {
-					return fmt.Errorf("package @%s/%s:%s not found in cache", namespace, name, version)
+					return fmt.Errorf("package %s not found in cache", pkgSpec)
 				}
 				return fmt.Errorf("failed to check package: %v", err)
 			}
 			if !info.IsDir() {
-				return fmt.Errorf("package @%s/%s:%s is not a directory", namespace, name, version)
+				return fmt.Errorf("package %s is not a directory", pkgSpec)
 			}
 
 			if err := os.RemoveAll(pkgDir); err != nil {
 				return fmt.Errorf("failed to remove package: %v", err)
 			}
 
-			fmt.Printf("Removed @%s/%s:%s from cache\n", namespace, name, version)
+			fmt.Printf("Removed %s from cache\n", pkgSpec)
 			return nil
 		},
 	}

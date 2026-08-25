@@ -136,7 +136,7 @@ func TestExtractFromDirectory(t *testing.T) {
 	// Verify the deps exist (order not guaranteed due to filepath.Walk)
 	found := make(map[string]bool)
 	for _, dep := range deps {
-		found[dep.Key()] = true
+		found[dep.String()] = true
 	}
 
 	expected := []string{
@@ -154,7 +154,7 @@ func TestExtractFromDirectory(t *testing.T) {
 func TestDependencyKey(t *testing.T) {
 	dep := Dependency{Namespace: "preview", Name: "cetz", Version: "0.3.0"}
 	want := "@preview/cetz:0.3.0"
-	if got := dep.Key(); got != want {
+	if got := dep.String(); got != want {
 		t.Errorf("Key() = %q, want %q", got, want)
 	}
 }

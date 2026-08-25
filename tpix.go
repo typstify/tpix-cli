@@ -3,9 +3,10 @@ package tpix
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 
 	"github.com/typstify/tpix-cli/api"
 	"github.com/typstify/tpix-cli/bundler"
@@ -29,31 +30,13 @@ func NewTpixSdk(httpClient *api.HttpClient) *TpixSdk {
 	}
 }
 
-// Helper functions
-
-// ParsePkgSpec parses a package spec in the format @namespace/name:version
-// Returns namespace, name, and version (version may be empty)
-func ParsePkgSpec(pkgSpec string) (namespace, name, version string) {
-	// Remove leading @ and split on /
-	s := strings.TrimPrefix(pkgSpec, "@")
-	parts := strings.SplitN(s, "/", 2)
-	if len(parts) < 2 {
-		return
-	}
-	namespace = parts[0]
-
-	// Split name and version on :
-	nameVer := strings.SplitN(parts[1], ":", 2)
-	name = nameVer[0]
-	if len(nameVer) > 1 {
-		version = nameVer[1]
-	}
-	return
-}
-
 // isPackageCached checks if a package version is already in the local cache.
-func isPackageCached(cacheDir, namespace, name, version string) bool {
-	pkgDir := filepath.Join(cacheDir, namespace, name, version)
+func isPackageCached(cacheDir string, pkg deps.Dependency) bool {
+	if !pkg.Partial() {
+		return false
+	}
+
+	pkgDir := filepath.Join(cacheDir, pkg.Namespace, pkg.Name, pkg.Version)
 	info, err := os.Stat(pkgDir)
 	return err == nil && info.IsDir()
 }
@@ -64,24 +47,24 @@ func (t *TpixSdk) WithReporter(reporter ReportFunc) {
 
 // fetchWithDeps downloads a package and its transitive dependencies.
 // visited tracks already-processed packages to prevent infinite loops.
-func (t *TpixSdk) fetchWithDeps(namespace, name, version, cacheDir string, visited map[string]bool, noDeps bool) error {
-	key := fmt.Sprintf("@%s/%s:%s", namespace, name, version)
-	if visited[key] {
+func (t *TpixSdk) fetchWithDeps(pkg deps.Dependency, cacheDir string, visited *[]deps.Dependency, noDeps bool) error {
+	if slices.Contains(*visited, pkg) {
 		return nil
 	}
-	visited[key] = true
 
-	if isPackageCached(cacheDir, namespace, name, version) {
+	*visited = append(*visited, pkg)
+
+	if isPackageCached(cacheDir, pkg) {
 		if t.reporter != nil {
-			t.reporter(fmt.Sprintf("  Already cached: %s\n", key))
+			t.reporter(fmt.Sprintf("  Already cached: %s\n", pkg))
 		}
 		// Do not return early, check if dependencies are satisfied.
 	} else {
 		if t.reporter != nil {
-			t.reporter(fmt.Sprintf("  Downloading %s...\n", key))
+			t.reporter(fmt.Sprintf("  Downloading %s...\n", pkg))
 		}
-		if err := t.client.DownloadPackage(namespace, name, version, cacheDir); err != nil {
-			return fmt.Errorf("failed to download %s: %w", key, err)
+		if err := t.client.DownloadPackage(pkg.Namespace, pkg.Name, pkg.Version, cacheDir); err != nil {
+			return fmt.Errorf("failed to download %s: %w", pkg, err)
 		}
 	}
 
@@ -90,14 +73,19 @@ func (t *TpixSdk) fetchWithDeps(namespace, name, version, cacheDir string, visit
 	}
 
 	// Fetch and resolve transitive dependencies
-	depInfos, err := t.client.FetchDependencies(namespace, name, version)
+	depInfos, err := t.client.FetchDependencies(pkg.Namespace, pkg.Name, pkg.Version)
 	if err != nil {
 		// Non-fatal: the server may not have dependency data for older packages
 		return nil
 	}
 
 	for _, dep := range depInfos {
-		if err := t.fetchWithDeps(dep.Namespace, dep.Name, dep.Version, cacheDir, visited, false); err != nil {
+		depSpec := deps.Dependency{
+			Namespace: dep.Namespace,
+			Name:      dep.Name,
+			Version:   dep.Version,
+		}
+		if err := t.fetchWithDeps(depSpec, cacheDir, visited, false); err != nil {
 			return err
 		}
 	}
@@ -114,44 +102,47 @@ func (t *TpixSdk) SearchPackages(namespace string, query string, kind string, ca
 	return t.client.SearchPackages(query, namespace, kind, category, sort, limit)
 }
 
-// DownloadPackage download Typst packages from TPIX server.
-// pkgSpec should follow the pattern:  @namespace/name:version. Refer to [parsePkgSpec] to know details.
+// DownloadPackage download Typst packages from TPIX server and returns downloaded package spec list.
+//
+// pkgSpec should follow the pattern:  @namespace/name:version. Refer to [deps.ParseDependency] to know details.
 // If noDeps is true, it will skip fetching transitive dependencies.
-func (t *TpixSdk) DownloadPackage(pkgSpec string, cacheDir string, noDeps bool) (string, int, error) {
+//
+// The first item of returned slice will always be the pkgSpec.
+func (t *TpixSdk) DownloadPackage(pkgSpec string, cacheDir string, noDeps bool) ([]deps.Dependency, error) {
 	// Parse namespace/name:version
-	namespace, name, version := ParsePkgSpec(pkgSpec)
+	spec := deps.ParseDependency(pkgSpec)
 
-	if version == "" {
+	if spec.Version == "" {
 		// Get latest version first
-		pkg, err := t.client.FetchPackage(namespace, name)
+		pkg, err := t.client.FetchPackage(spec.Namespace, spec.Name)
 		if err != nil {
-			return "", 0, err
+			return nil, err
 		}
 		if len(pkg.Versions) == 0 {
-			return "", 0, fmt.Errorf("no versions available for package")
+			return nil, fmt.Errorf("no versions available for package")
 		}
-		version = pkg.Versions[0].Version
+		spec.Version = pkg.Versions[0].Version
 	}
 
 	if cacheDir == "" {
-		return "", 0, fmt.Errorf("typst cache directory not configured")
+		return nil, fmt.Errorf("typst cache directory not configured")
 	}
 
 	if t.reporter != nil {
-		t.reporter(fmt.Sprintf("Resolving @%s/%s:%s...\n", namespace, name, version))
+		t.reporter(fmt.Sprintf("Resolving %s...\n", spec))
 	}
 
-	visited := make(map[string]bool)
-	if err := t.fetchWithDeps(namespace, name, version, cacheDir, visited, noDeps); err != nil {
-		return "", 0, err
+	var visited []deps.Dependency
+	if err := t.fetchWithDeps(spec, cacheDir, &visited, noDeps); err != nil {
+		return nil, err
 	}
 
 	if t.reporter != nil {
 		t.reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(visited)))
 	}
 
-	pkgPath := filepath.Join(cacheDir, namespace, name, version)
-	return pkgPath, len(visited), nil
+	log.Println("pkgPaths: ", visited)
+	return visited, nil
 }
 
 func (t *TpixSdk) DownloadProjectDependencies(projectDir string, cacheDir string, dryRun bool) error {
@@ -182,22 +173,32 @@ func (t *TpixSdk) DownloadProjectDependencies(projectDir string, cacheDir string
 
 	if dryRun {
 		for _, dep := range discovered {
-			cached := isPackageCached(cacheDir, dep.Namespace, dep.Name, dep.Version)
+			depSpec := deps.Dependency{
+				Namespace: dep.Namespace,
+				Name:      dep.Name,
+				Version:   dep.Version,
+			}
+			cached := isPackageCached(cacheDir, depSpec)
 			status := "missing"
 			if cached {
 				status = "cached"
 			}
 
 			if t.reporter != nil {
-				t.reporter(fmt.Sprintf("  %s [%s]\n", dep.Key(), status))
+				t.reporter(fmt.Sprintf("  %s [%s]\n", dep.String(), status))
 			}
 		}
 		return nil
 	}
 
-	visited := make(map[string]bool)
+	visited := make([]deps.Dependency, 0)
 	for _, dep := range discovered {
-		if err := t.fetchWithDeps(dep.Namespace, dep.Name, dep.Version, cacheDir, visited, false); err != nil {
+		depSpec := deps.Dependency{
+			Namespace: dep.Namespace,
+			Name:      dep.Name,
+			Version:   dep.Version,
+		}
+		if err := t.fetchWithDeps(depSpec, cacheDir, &visited, false); err != nil {
 			return err
 		}
 	}
@@ -211,9 +212,9 @@ func (t *TpixSdk) DownloadProjectDependencies(projectDir string, cacheDir string
 
 func (t *TpixSdk) QueryPackage(pkgSpec string) (*api.PackageResponse, error) {
 	// Parse namespace/name
-	namespace, name, _ := ParsePkgSpec(pkgSpec)
+	spec := deps.ParseDependency(pkgSpec)
 
-	pkg, err := t.client.FetchPackage(namespace, name)
+	pkg, err := t.client.FetchPackage(spec.Namespace, spec.Name)
 	if err != nil {
 		return nil, err
 	}

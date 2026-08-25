@@ -8,18 +8,6 @@ import (
 	"strings"
 )
 
-// Dependency represents a parsed Typst package import.
-type Dependency struct {
-	Namespace string
-	Name      string
-	Version   string
-}
-
-// Key returns a unique string key for deduplication.
-func (d Dependency) Key() string {
-	return "@" + d.Namespace + "/" + d.Name + ":" + d.Version
-}
-
 var importRegex = regexp.MustCompile(`#import\s+"@([^/]+)/([^:]+):([^"]+)"`)
 
 // ExtractFromSource scans a single .typ file's content for package imports.
@@ -69,8 +57,8 @@ func ExtractFromSource(content []byte) []Dependency {
 					Name:      string(match[2]),
 					Version:   string(match[3]),
 				}
-				if _, ok := seen[dep.Key()]; !ok {
-					seen[dep.Key()] = struct{}{}
+				if _, ok := seen[dep.String()]; !ok {
+					seen[dep.String()] = struct{}{}
 					deps = append(deps, dep)
 				}
 			}
@@ -102,8 +90,8 @@ func ExtractFromDirectory(dirPath string) ([]Dependency, error) {
 		}
 
 		for _, dep := range ExtractFromSource(content) {
-			if _, ok := seen[dep.Key()]; !ok {
-				seen[dep.Key()] = struct{}{}
+			if _, ok := seen[dep.String()]; !ok {
+				seen[dep.String()] = struct{}{}
 				deps = append(deps, dep)
 			}
 		}
