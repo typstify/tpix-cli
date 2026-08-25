@@ -26,12 +26,22 @@ type ApiKeyProvider interface {
 
 type HttpClient struct {
 	apiKeyProvider ApiKeyProvider
-	maxRetry       int
+	httpClient     *http.Client
+	// baseURL is the TPIX server base URL. Defaults to TpixServer.
+	baseURL string
+	// maxRetry is the number of attempts for retryable failures.
+	maxRetry int
 }
 
 func NewHttpClient(provider ApiKeyProvider) *HttpClient {
+	defaultClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
 	return &HttpClient{
 		apiKeyProvider: provider,
+		httpClient:     defaultClient,
+		baseURL:        TpixServer,
 		// max retry after request failed for some reason
 		maxRetry: 5,
 	}
@@ -39,6 +49,17 @@ func NewHttpClient(provider ApiKeyProvider) *HttpClient {
 
 func (c *HttpClient) SetMaxRetry(maxRetry int) {
 	c.maxRetry = maxRetry
+}
+
+// SetHttpClient overrides the underlying HTTP client used to send requests.
+func (c *HttpClient) SetHttpClient(client *http.Client) {
+	c.httpClient = client
+}
+
+// SetBaseURL overrides the server base URL. This is primarily useful in tests
+// to point the client at an httptest.Server.
+func (c *HttpClient) SetBaseURL(baseURL string) {
+	c.baseURL = baseURL
 }
 
 // MakeRequest creates an HTTP request with Bearer token. The request is retried when
@@ -63,7 +84,7 @@ func (c *HttpClient) MakeRequest(method, url string, body io.Reader, contentType
 
 // doRequest executes a single HTTP request without retry logic.
 func (c *HttpClient) doRequest(method, url string, bodyBytes []byte, contentType string) (*http.Response, error) {
-	apiUrl := fmt.Sprintf("%s%s", TpixServer, url)
+	apiUrl := fmt.Sprintf("%s%s", c.baseURL, url)
 
 	var bodyReader io.Reader
 	if bodyBytes != nil {
@@ -84,7 +105,12 @@ func (c *HttpClient) doRequest(method, url string, bodyBytes []byte, contentType
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	return http.DefaultClient.Do(req)
+	client := c.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	return client.Do(req)
 }
 
 func (c *HttpClient) doRequestWithRetry(method, url string, bodyBytes []byte, contentType string) (*http.Response, error) {
