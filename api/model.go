@@ -3,8 +3,6 @@ package api
 import (
 	"fmt"
 	"time"
-
-	"github.com/typstify/tpix-cli/bundler"
 )
 
 // API response types
@@ -28,15 +26,16 @@ type SearchResult struct {
 	Authors       []string  `json:"authors"`
 	Categories    []string  `json:"categories"`
 	Disciplines   []string  `json:"disciplines"`
+	Thumbnail     string    `json:"thumbnail"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
 // PackageVersionInfo represents package version information
 type PackageVersionInfo struct {
-	Version     string           `json:"version"`
-	SHA256      string           `json:"sha256"`
-	PublishedAt time.Time        `json:"published_at"`
-	Meta        bundler.Manifest `json:"meta"`
+	Version        string    `json:"version"`
+	MinCompilerVer string    `json:"minCompilerVer"`
+	SHA256         string    `json:"sha256"`
+	PublishedAt    time.Time `json:"published_at"`
 }
 
 // PackageResponse represents a package details response
@@ -49,8 +48,13 @@ type PackageResponse struct {
 	Description     string               `json:"description"`
 	HomepageURL     string               `json:"homepage_url"`
 	RepositoryURL   string               `json:"repository_url"`
+	Authors         []string             `json:"authors"`
+	Keywords        []string             `json:"keywords"`
+	Categories      []string             `json:"categories"`
+	Disciplines     []string             `json:"disciplines"`
 	License         string               `json:"license"`
 	IsTemplate      bool                 `json:"is_template"`
+	Thumbnail       string               `json:"thumbnail"`
 	LastPublishedAt time.Time            `json:"last_published_at"` // latest published time
 	CreatedAt       time.Time            `json:"created_at"`
 	UpdatedAt       time.Time            `json:"updated_at"`

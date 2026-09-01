@@ -33,6 +33,7 @@ func main() {
 	//rootCmd.PersistentFlags().StringVar(&tpixServer, "server", tpixServer, "TPIX server URL")
 
 	rootCmd.AddCommand(loginCmd())
+	rootCmd.AddCommand(newPackageCmd())
 	rootCmd.AddCommand(searchPkgCmd())
 	rootCmd.AddCommand(getPkgCmd())
 	rootCmd.AddCommand(pullCmd())

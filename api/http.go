@@ -357,3 +357,24 @@ func (c *ApiClient) GetPackageIndex() (string, error) {
 
 	return string(txt), nil
 }
+
+func (c *ApiClient) GetNamespacePackages(namespace string) ([]PackageResponse, error) {
+	path := fmt.Sprintf("/api/v1/namespaces/%s/index.json", namespace)
+
+	resp, err := c.client.MakeRequest("GET", path, nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get namespace index")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get namespace index: %w", readError(resp))
+	}
+
+	packages := []PackageResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(&packages); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return packages, nil
+}

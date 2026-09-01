@@ -354,8 +354,13 @@ func (t *TpixSdk) DeleteZoteroExport(exportID string) error {
 	return nil
 }
 
-// ListLLMAccesiblePackages retrieves a markdown file containing all user
+// GetPackageIndex retrieves a markdown file containing all user
 // accessible package/template metadata. This API is dedicated for LLM use.
 func (t *TpixSdk) GetPackageIndex() (string, error) {
 	return t.client.GetPackageIndex()
+}
+
+// GetNamespacePackages fetches all the packages in the specified namespace.
+func (t *TpixSdk) GetNamespacePackages(namespace string) ([]api.PackageResponse, error) {
+	return t.client.GetNamespacePackages(namespace)
 }

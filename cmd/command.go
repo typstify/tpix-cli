@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	cli "github.com/typstify/tpix-cli"
+	"github.com/typstify/tpix-cli/cmd/pkg"
 	"github.com/typstify/tpix-cli/deps"
 	"github.com/typstify/tpix-cli/version"
 )
@@ -46,6 +47,53 @@ func loginCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&apiKey, "apiKey", "k", "", " API key issued by https://tpix.typstify.com")
+
+	return cmd
+}
+
+func newPackageCmd() *cobra.Command {
+	var targetDir string
+	var isTemplate bool
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:     "new",
+		Short:   "Create a new typst package or template",
+		Long:    "Create a new typst package or template skeleton project",
+		Example: "tpix new -d ~/work -t -n my-namespace my-package-name",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pkgName := strings.TrimSpace(args[0])
+			if pkgName == "" {
+				return errors.New("missing package/template name")
+			}
+
+			if targetDir == "" {
+				return errors.New("Please specify a desitination directory")
+			}
+
+			var username, email string
+			user, err := sdk.GetUserProfile()
+			if err == nil {
+				username = user.Username
+				email = user.Email
+			}
+
+			pkgDir, err := pkg.CreatePkg(targetDir, namespace, pkgName, isTemplate, username, email)
+			if err != nil {
+				cmdReporter(fmt.Sprintf("failed to create package: %v", err))
+				return nil
+			}
+
+			cmdReporter(fmt.Sprintf("Success! Package dir: %s\n", pkgDir))
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&targetDir, "dest", "d", ".", "The directory where to create the package or template.")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "preview", "The namespace name the package belongs to.")
+	cmd.Flags().BoolVarP(&isTemplate, "template", "t", false, "Create a template package instead of a library package.")
 
 	return cmd
 }
@@ -310,24 +358,25 @@ func queryPkgCmd() *cobra.Command {
 			fmt.Printf("Description: %s\n", pkg.Description)
 			fmt.Printf("Template: %t\n", pkg.IsTemplate)
 			fmt.Printf("License: %s\n", pkg.License)
+			fmt.Printf("Authors: %s\n", strings.Join(pkg.Authors, ", "))
+			fmt.Printf("Categories: %s\n", strings.Join(pkg.Categories, ", "))
+			fmt.Printf("Disciplines: %s\n", strings.Join(pkg.Disciplines, ", "))
 
 			if len(pkg.Versions) > 0 {
 				latestVer := pkg.Versions[0]
 
 				fmt.Printf("Latest Version:  %s\n", latestVer.Version)
-				fmt.Printf("Minimum Typst Version: %s\n", latestVer.Meta.Package.Compiler)
+				fmt.Printf("Minimum Typst Version: %s\n", latestVer.MinCompilerVer)
 
-				fmt.Printf("Authors: %s\n", strings.Join(latestVer.Meta.Package.Authors, ", "))
-				fmt.Printf("Categories: %s\n", strings.Join(latestVer.Meta.Package.Categories, ", "))
-				fmt.Printf("Disciplines: %s\n", strings.Join(latestVer.Meta.Package.Disciplines, ", "))
 			}
+
 			fmt.Printf("Last Publish: %s\n", pkg.LastPublishedAt.Format(time.DateOnly))
 			fmt.Printf("Website: %s\n", pkg.HomepageURL)
 			fmt.Printf("Repository: %s\n", pkg.RepositoryURL)
 
 			fmt.Printf("\nVersions:\n")
 			for _, v := range pkg.Versions {
-				fmt.Printf("  %s (Typst: %s)\n", v.Version, v.Meta.Package.Compiler)
+				fmt.Printf("  %s (Typst: %s)\n", v.Version, v.MinCompilerVer)
 			}
 
 			return nil
