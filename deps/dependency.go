@@ -59,7 +59,11 @@ func (s Dependency) String() string {
 
 }
 
+func (s Dependency) IsValid() bool {
+	return s.Namespace != "" && s.Name != ""
+}
+
 // Partial checks if s has all fields or not.
 func (s Dependency) Partial() bool {
-	return s.Namespace != "" && s.Name != "" && s.Version != ""
+	return !s.IsValid() || s.Version == ""
 }
