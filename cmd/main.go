@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
 	"github.com/typstify/tpix-cli"
 	"github.com/typstify/tpix-cli/api"
@@ -23,12 +26,14 @@ func main() {
 	cm = &CliConfigManager{}
 	cfg, err := cm.Load()
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 
 	store, err := storage.NewFsPackageStore(cfg.TypstCachePkgPath)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 	pkgCache = store
 
@@ -53,5 +58,7 @@ func main() {
 	rootCmd.AddCommand(cachePathCmd())
 	rootCmd.AddCommand(zoteroCmd())
 
-	rootCmd.Execute()
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }

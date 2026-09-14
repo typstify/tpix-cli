@@ -165,6 +165,10 @@ func (c *CliConfigManager) Save(cfg config.Config) error {
 	}
 
 	c.cfg = cfg
+	// The effective config may differ from what was just saved (e.g. the
+	// TYPST_PACKAGE_CACHE_PATH env var overrides the cache path), so force the
+	// next Load to re-resolve it from disk and the environment.
+	c.loaded = false
 	return nil
 }
 

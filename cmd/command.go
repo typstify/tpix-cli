@@ -80,8 +80,7 @@ func newPackageCmd() *cobra.Command {
 
 			pkgDir, err := pkg.CreatePkg(targetDir, namespace, pkgName, isTemplate, username, email)
 			if err != nil {
-				cmdReporter(fmt.Sprintf("failed to create package: %v", err))
-				return nil
+				return fmt.Errorf("failed to create package: %w", err)
 			}
 
 			cmdReporter(fmt.Sprintf("Success! Package dir: %s\n", pkgDir))
@@ -118,8 +117,7 @@ func searchPkgCmd() *cobra.Command {
 
 			result, err := sdk.SearchPackages(namespace, query, kind, category, sort, limit)
 			if err != nil {
-				fmt.Printf("failed to search packages: %v", err)
-				return nil
+				return fmt.Errorf("failed to search packages: %w", err)
 			}
 
 			fmt.Printf("Found %d results for '%s':\n\n", result.Count, query)
@@ -260,12 +258,19 @@ func removeCachedCmd() *cobra.Command {
 				return fmt.Errorf("invalid package spec: use format @namespace/name:version")
 			}
 
-			err := pkgCache.Remove(pkgSpec)
+			exists, err := pkgCache.Has(pkgSpec)
 			if err != nil {
 				return err
 			}
+			if !exists {
+				return fmt.Errorf("package %s not found in cache", pkgSpec)
+			}
 
-			fmt.Printf("Removed %s from cache\n", pkgSpec)
+			if err := pkgCache.Remove(pkgSpec); err != nil {
+				return err
+			}
+
+			cmdReporter(fmt.Sprintf("Removed %s from cache\n", pkgSpec))
 			return nil
 		},
 	}
@@ -497,9 +502,13 @@ If neither is set, the default path is used:
 					if err := cm.Save(cfg); err != nil {
 						return fmt.Errorf("failed to save config: %w", err)
 					}
-					cfg, _ = cm.Load()
 
-					fmt.Printf("Cache path reset to: %s\n", cfg.TypstCachePkgPath)
+					effective, err := cm.Load()
+					if err != nil {
+						return err
+					}
+
+					fmt.Printf("Cache path reset to: %s\n", effective.TypstCachePkgPath)
 					return nil
 				}
 
@@ -519,9 +528,17 @@ If neither is set, the default path is used:
 				if err := cm.Save(cfg); err != nil {
 					return fmt.Errorf("failed to save config: %w", err)
 				}
-				cfg, _ = cm.Load()
 
-				fmt.Printf("Cache path set to: %s\n", cfg.TypstCachePkgPath)
+				effective, err := cm.Load()
+				if err != nil {
+					return err
+				}
+
+				if effective.TypstCachePkgPath != setPath {
+					fmt.Printf("Cache path set to: %s (overridden by %s: %s)\n", setPath, cachePathEnv, effective.TypstCachePkgPath)
+				} else {
+					fmt.Printf("Cache path set to: %s\n", effective.TypstCachePkgPath)
+				}
 				return nil
 			}
 
