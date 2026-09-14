@@ -46,3 +46,8 @@ type PackageView interface {
 type ContentStore interface {
 	View(pkg deps.Dependency) (PackageView, error)
 }
+
+type Store interface {
+	PackageStore
+	ContentStore
+}
