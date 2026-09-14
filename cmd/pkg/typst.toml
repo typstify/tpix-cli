@@ -14,7 +14,8 @@ entrypoint = "{{ .Package.Entrypoint }}"
 authors = [{{range $i, $v := .Package.Authors}}{{if $i}}, {{end}}"{{$v}}"{{end}}]
 
 # The package's license. Must contain a valid SPDX-2 expression describing one or 
-# multiple OSI-approved licenses.
+# multiple OSI-approved licenses. For proprietary or unlicensed code, please use
+# 'Proprietary' or 'UNLICENSED'. For more details, refer to https://tpix.typstify.com/docs.
 license = "{{ .Package.License }}"
 
 # A short description of the package. Double-check this for grammar and spelling mistakes 
