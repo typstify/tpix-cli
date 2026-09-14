@@ -115,7 +115,7 @@ func (d *Updater) getRelease() (*Release, error) {
 	}
 
 	// asset name should be like 'tpix-cli-windows-amd64.tar.gz'
-	assetNamePat := fmt.Sprintf(`^tpix-cli-%s-%s-?\w*?\.(tar\.gz|zip)$`, runtime.GOOS, runtime.GOARCH)
+	assetNamePat := fmt.Sprintf(`^tpix-cli-%s-%s-?\w*?\.tar\.gz$`, runtime.GOOS, runtime.GOARCH)
 	//log.Println("re pattern: ", assetNamePat)
 	re := regexp.MustCompile(assetNamePat)
 	var target Asset

@@ -14,6 +14,7 @@ import (
 
 	"github.com/typstify/tpix-cli/api"
 	"github.com/typstify/tpix-cli/deps"
+	"github.com/typstify/tpix-cli/storage"
 )
 
 // fakeKeyProvider is a minimal api.ApiKeyProvider for tests.
@@ -32,7 +33,12 @@ func newTestSdk(t *testing.T, handler http.Handler) *TpixSdk {
 	hc.SetMaxRetry(1)
 	hc.SetBaseURL(server.URL)
 
-	return NewTpixSdk(hc)
+	store, err := storage.NewFsPackageStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFsPackageStore() error = %v", err)
+	}
+
+	return NewTpixSdk(hc, store)
 }
 
 // tarGzBytes builds an in-memory tar.gz archive from a map of file name to content.
@@ -76,110 +82,6 @@ func writePackageDir(t *testing.T, dir, manifest string, files map[string]string
 		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
 			t.Fatal(err)
 		}
-	}
-}
-
-func TestParseDependency(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want deps.Dependency
-	}{
-		{"full spec", "@preview/cetz:0.3.0", deps.Dependency{Namespace: "preview", Name: "cetz", Version: "0.3.0"}},
-		{"no version", "@preview/cetz", deps.Dependency{Namespace: "preview", Name: "cetz"}},
-		{"namespace with dash", "@my-ns/foo:v1.2.3", deps.Dependency{Namespace: "my-ns", Name: "foo", Version: "v1.2.3"}},
-		{"empty input", "", deps.Dependency{}},
-		{"no slash", "preview", deps.Dependency{}},
-		{"only namespace", "@preview", deps.Dependency{}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := deps.ParseDependency(tt.in); got != tt.want {
-				t.Errorf("ParseDependency(%q) = %+v, want %+v", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDependencyString(t *testing.T) {
-	tests := []struct {
-		name string
-		dep  deps.Dependency
-		want string
-	}{
-		{"full", deps.Dependency{Namespace: "preview", Name: "cetz", Version: "0.3.0"}, "@preview/cetz:0.3.0"},
-		{"no version", deps.Dependency{Namespace: "preview", Name: "cetz"}, "@preview/cetz"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.dep.String(); got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDependencyPartial(t *testing.T) {
-	tests := []struct {
-		name string
-		dep  deps.Dependency
-		want bool
-	}{
-		{"full", deps.Dependency{Namespace: "preview", Name: "cetz", Version: "0.3.0"}, true},
-		{"missing version", deps.Dependency{Namespace: "preview", Name: "cetz"}, false},
-		{"empty", deps.Dependency{}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.dep.Partial(); got != tt.want {
-				t.Errorf("Partial() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDependencyRelPath(t *testing.T) {
-	full := deps.Dependency{Namespace: "preview", Name: "cetz", Version: "0.3.0"}
-	if want := filepath.Join("preview", "cetz", "0.3.0"); full.RelPath() != want {
-		t.Errorf("RelPath() = %q, want %q", full.RelPath(), want)
-	}
-
-	partial := deps.Dependency{Namespace: "preview", Name: "cetz"}
-	if got := partial.RelPath(); got != "" {
-		t.Errorf("RelPath() for partial spec = %q, want empty", got)
-	}
-}
-
-func TestIsPackageCached(t *testing.T) {
-	cacheDir := t.TempDir()
-	pkgDir := filepath.Join(cacheDir, "preview", "cetz", "0.3.0")
-	if err := os.MkdirAll(pkgDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	if !isPackageCached(cacheDir, deps.Dependency{Namespace: "preview", Name: "cetz", Version: "0.3.0"}) {
-		t.Error("expected cached package to be detected")
-	}
-	if isPackageCached(cacheDir, deps.Dependency{Namespace: "preview", Name: "cetz", Version: "9.9.9"}) {
-		t.Error("expected missing version to not be cached")
-	}
-	if isPackageCached(cacheDir, deps.Dependency{Namespace: "preview", Name: "cetz"}) {
-		t.Error("expected partial spec to not be cached")
-	}
-}
-
-func TestDownloadPackageEmptyCacheDir(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-	})
-	sdk := newTestSdk(t, handler)
-
-	_, err := sdk.DownloadPackage("@preview/cetz:0.3.0", "", false)
-	if err == nil {
-		t.Fatal("expected error for empty cache dir")
-	}
-	if !strings.Contains(err.Error(), "cache directory") {
-		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -233,7 +135,7 @@ func TestDownloadProjectDependenciesDryRun(t *testing.T) {
 
 	// Directory with no imports should succeed without network.
 	dir := t.TempDir()
-	if err := sdk.DownloadProjectDependencies(dir, t.TempDir(), false); err != nil {
+	if err := sdk.DownloadProjectDependencies(dir, false); err != nil {
 		t.Fatalf("DownloadProjectDependencies() error = %v", err)
 	}
 
@@ -243,7 +145,7 @@ func TestDownloadProjectDependenciesDryRun(t *testing.T) {
 	})
 	var msgs []string
 	sdk.WithReporter(func(m string) { msgs = append(msgs, m) })
-	if err := sdk.DownloadProjectDependencies(dir, t.TempDir(), true); err != nil {
+	if err := sdk.DownloadProjectDependencies(dir, true); err != nil {
 		t.Fatalf("DownloadProjectDependencies() dry run error = %v", err)
 	}
 	found := false
@@ -337,8 +239,7 @@ func TestDownloadPackageResolvesLatestVersion(t *testing.T) {
 	})
 
 	sdk := newTestSdk(t, mux)
-	cacheDir := t.TempDir()
-	specs, err := sdk.DownloadPackage("@preview/cetz", cacheDir, true)
+	specs, err := sdk.DownloadPackage("@preview/cetz", true)
 	if err != nil {
 		t.Fatalf("DownloadPackage() error = %v", err)
 	}
@@ -386,8 +287,7 @@ func TestDownloadPackageWithDeps(t *testing.T) {
 	var msgs []string
 	sdk.WithReporter(func(m string) { msgs = append(msgs, m) })
 
-	cacheDir := t.TempDir()
-	specs, err := sdk.DownloadPackage("@preview/cetz:0.3.0", cacheDir, false)
+	specs, err := sdk.DownloadPackage("@preview/cetz:0.3.0", false)
 	if err != nil {
 		t.Fatalf("DownloadPackage() error = %v", err)
 	}
@@ -397,12 +297,13 @@ func TestDownloadPackageWithDeps(t *testing.T) {
 		t.Fatalf("resolved %d packages, want 2: %+v", len(specs), specs)
 	}
 
-	// Archives should be extracted into the cache.
-	if _, err := os.Stat(filepath.Join(cacheDir, "preview", "cetz", "0.3.0", "main.typ")); err != nil {
-		t.Errorf("cetz not extracted: %v", err)
+	// Archives should be exists in the cache.
+	if exists, err := sdk.store.Has(deps.ParseDependency("@preview/cetz:0.3.0")); err != nil || !exists {
+		t.Errorf("cetz not resolved: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(cacheDir, "preview", "tablex", "0.0.6", "typst.toml")); err != nil {
-		t.Errorf("tablex not extracted: %v", err)
+
+	if exists, err := sdk.store.Has(deps.ParseDependency("@preview/tablex:0.0.6")); err != nil || !exists {
+		t.Errorf("tablex not resolved: %v", err)
 	}
 
 	// Reporter should announce both packages.

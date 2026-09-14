@@ -3,24 +3,26 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 
-	"github.com/typstify/tpix-cli/utils"
+	"github.com/typstify/tpix-cli/deps"
+	"github.com/typstify/tpix-cli/storage"
 )
 
 // ApiClient is the API wrapper to access TPIX rest APIs.
 type ApiClient struct {
 	client *HttpClient
+	store  storage.PackageStore
 }
 
-func NewApiClient(client *HttpClient) *ApiClient {
-	return &ApiClient{client: client}
+func NewApiClient(client *HttpClient, store storage.PackageStore) *ApiClient {
+	return &ApiClient{client: client, store: store}
 }
 
 func readError(resp *http.Response) error {
@@ -85,9 +87,12 @@ func (c *ApiClient) SearchPackages(query, namespace string, kind string, categor
 	return &result, nil
 }
 
-// DownloadPackage downloads a package, extracts it to the cache directory,
-// and saves the archive to output path.
-func (c *ApiClient) DownloadPackage(namespace, name, version string, cacheDir string) error {
+// DownloadPackage downloads a package, and save to the package store.
+func (c *ApiClient) DownloadPackage(namespace, name, version string) error {
+	if namespace == "" || name == "" || version == "" {
+		return errors.New("missing namespace or name, or version")
+	}
+
 	url := &url.URL{Path: fmt.Sprintf("/api/v1/download/%s/%s/%s", namespace, name, version)}
 
 	resp, err := c.client.MakeRequest("GET", url.String(), nil, "")
@@ -100,27 +105,14 @@ func (c *ApiClient) DownloadPackage(namespace, name, version string, cacheDir st
 		return fmt.Errorf("download failed: %w", readError(resp))
 	}
 
-	// Create temp file for the archive
-	tmpFile, err := os.CreateTemp("", "tpix-*.tar.gz")
+	if c.store == nil {
+		return fmt.Errorf("typst cache storage not set")
+	}
+
+	pkg := deps.Dependency{Namespace: namespace, Name: name, Version: version}
+	err = c.store.Add(pkg, resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	_, err = io.Copy(tmpFile, resp.Body)
-	tmpFile.Close()
-	if err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	if cacheDir == "" {
-		return fmt.Errorf("typst cache directory not set")
-	}
-
-	extractDir := filepath.Join(cacheDir, namespace, name, version)
-	if err := utils.ExtractTarGz(tmpPath, extractDir); err != nil {
-		return fmt.Errorf("failed to extract package: %w", err)
+		return fmt.Errorf("failed to add package %s to package store: %w", pkg, err)
 	}
 
 	return nil
@@ -128,6 +120,10 @@ func (c *ApiClient) DownloadPackage(namespace, name, version string, cacheDir st
 
 // FetchPackage fetches package details from the TPIX server.
 func (c *ApiClient) FetchPackage(namespace, name string) (*PackageResponse, error) {
+	if namespace == "" || name == "" {
+		return nil, errors.New("missing namespace or name")
+	}
+
 	path := &url.URL{Path: fmt.Sprintf("/api/v1/packages/%s/%s", namespace, name)}
 	resp, err := c.client.MakeRequest("GET", path.String(), nil, "")
 	if err != nil {
@@ -149,6 +145,10 @@ func (c *ApiClient) FetchPackage(namespace, name string) (*PackageResponse, erro
 
 // FetchDependencies fetches the dependencies for a specific package version.
 func (c *ApiClient) FetchDependencies(namespace, name, version string) ([]DependencyInfo, error) {
+	if namespace == "" || name == "" || version == "" {
+		return nil, errors.New("namespace, package name and version are required")
+	}
+
 	path := &url.URL{Path: fmt.Sprintf("/api/v1/packages/%s/%s/%s/dependencies", namespace, name, version)}
 	resp, err := c.client.MakeRequest("GET", path.String(), nil, "")
 	if err != nil {
@@ -170,6 +170,13 @@ func (c *ApiClient) FetchDependencies(namespace, name, version string) ([]Depend
 
 // UploadPackage uploads a package to the TPIX server.
 func (c *ApiClient) UploadPackage(packagePath, namespace string) (*UploadResponse, error) {
+	if packagePath == "" {
+		return nil, errors.New("package path is empty")
+	}
+	if namespace == "" {
+		return nil, errors.New("namespace is missing")
+	}
+
 	file, err := os.Open(packagePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open package file: %w", err)
@@ -280,6 +287,10 @@ func (c *ApiClient) CreateZoteroExport(target ZoteroExportTarget) (string, error
 // FetchLatestZoteroCollections fetches the latest version of Zotero items
 // from TPIX server.
 func (c *ApiClient) FetchLatestZoteroCollections(exportID string, writer io.Writer) error {
+	if exportID == "" {
+		return errors.New("export id is missing")
+	}
+
 	path := &url.URL{Path: fmt.Sprintf("/api/v1/zotero/exports/%s", exportID)}
 
 	resp, err := c.client.MakeRequest("GET", path.String(), nil, "")
@@ -301,6 +312,10 @@ func (c *ApiClient) FetchLatestZoteroCollections(exportID string, writer io.Writ
 }
 
 func (c *ApiClient) DeleteZoteroExport(exportID string) error {
+	if exportID == "" {
+		return errors.New("export id is missing")
+	}
+
 	path := &url.URL{Path: fmt.Sprintf("/api/v1/zotero/exports/%s", exportID)}
 
 	resp, err := c.client.MakeRequest("DELETE", path.String(), nil, "")
@@ -359,6 +374,10 @@ func (c *ApiClient) GetPackageIndex() (string, error) {
 }
 
 func (c *ApiClient) GetNamespacePackages(namespace string) ([]PackageResponse, error) {
+	if namespace == "" {
+		return nil, errors.New("namespace is missing")
+	}
+
 	path := fmt.Sprintf("/api/v1/namespaces/%s/index.json", namespace)
 
 	resp, err := c.client.MakeRequest("GET", path, nil, "")

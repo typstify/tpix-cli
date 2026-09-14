@@ -97,7 +97,9 @@ func (c *HttpClient) doRequest(method, url string, bodyBytes []byte, contentType
 	}
 
 	if c.apiKeyProvider != nil {
-		req.Header.Set("Authorization", "Bearer "+c.apiKeyProvider.Get())
+		if apiKey := c.apiKeyProvider.Get(); apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
 	}
 
 	req.Header.Set("User-Agent", TpixClientUserAgent)

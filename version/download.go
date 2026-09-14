@@ -1,9 +1,7 @@
 package version
 
 import (
-	"compress/gzip"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -12,8 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"archive/tar"
-	"archive/zip"
+	"github.com/typstify/tpix-cli/utils"
 )
 
 // DownloadCounter counts the number of bytes written to it. It implements to the io.Writer interface
@@ -126,110 +123,12 @@ func (d *Downloader) Download(onFinished func()) *DownloadProgress {
 }
 
 func (d *Downloader) uncompressToDir(targetFile *os.File, destDir string) error {
-	isZip := strings.HasSuffix(targetFile.Name(), ".zip")
-	isTarball := strings.HasSuffix(targetFile.Name(), ".tar.gz")
-	targetFile.Seek(0, io.SeekStart)
-
-	if isTarball {
-		err := d.uncompressTarFile(targetFile, destDir)
-		if err != nil {
-			return err
-		}
-	} else if isZip {
-		err := d.unzipFile(targetFile, destDir)
-		if err != nil {
-			return err
-		}
-	} else {
+	if !strings.HasSuffix(targetFile.Name(), ".tar.gz") {
 		return errors.New("Unknown release format: " + targetFile.Name())
 	}
 
-	return nil
-}
+	targetFile.Seek(0, io.SeekStart)
 
-func (d *Downloader) uncompressTarFile(targetFile *os.File, destDir string) error {
-	// First decompress with gzip
-	gz, err := gzip.NewReader(targetFile)
-	if err != nil {
-		return fmt.Errorf("failed to create gzip reader: %w", err)
-	}
-	defer gz.Close()
-
-	// Create a tar Reader from the decompressed stream
-	tr := tar.NewReader(gz)
-	// Iterate through the files in the archive.
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		switch header.Typeflag {
-		case tar.TypeDir:
-			// create a directory
-			err = os.MkdirAll(filepath.Join(destDir, header.Name), 0755)
-			if err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			// write a file
-			w, err := os.Create(filepath.Join(destDir, header.Name))
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(w, tr)
-			if err != nil {
-				return err
-			}
-			w.Close()
-		}
-	}
-
-	return nil
-}
-
-func (d *Downloader) unzipFile(targetFile *os.File, destDir string) error {
-	stat, err := targetFile.Stat()
-	if err != nil {
-		return err
-	}
-	var r *zip.Reader
-	r, err = zip.NewReader(targetFile, stat.Size())
-	if err != nil {
-		return err
-	}
-
-	for _, f := range r.File {
-		if f.FileInfo().IsDir() {
-			// create a directory
-			err = os.MkdirAll(filepath.Join(destDir, f.Name), 0755)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-
-		// normal file, write to destDir directly.
-		dest, err := os.Create(filepath.Join(destDir, f.Name))
-		if err != nil {
-			return err
-		}
-		defer dest.Close()
-
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-		defer rc.Close()
-
-		_, err = io.Copy(dest, rc)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-
+	// Extract through utils so archive entries cannot escape destDir.
+	return utils.ExtractTarGzFromReader(targetFile, destDir)
 }

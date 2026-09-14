@@ -38,9 +38,45 @@ func ParseDependency(pkgName string) Dependency {
 	return spec
 }
 
+// state classifies how completely a Dependency identifies a package.
+type state uint8
+
+const (
+	// stateInvalid means the namespace or name is missing, so the spec does
+	// not identify a package.
+	stateInvalid state = iota
+	// statePartial means the spec identifies a package but does not pin a
+	// version.
+	statePartial
+	// stateComplete means the spec fully identifies one package version.
+	stateComplete
+)
+
+// State reports how completely s identifies a package.
+func (s Dependency) state() state {
+	switch {
+	case s.Namespace == "" || s.Name == "":
+		return stateInvalid
+	case s.Version == "":
+		return statePartial
+	default:
+		return stateComplete
+	}
+}
+
+// IsValid reports whether s identifies at least a package (partial or complete).
+func (s Dependency) IsValid() bool { return s.state() != stateInvalid }
+
+// IsPartial reports whether s identifies a package without a pinned version.
+func (s Dependency) IsPartial() bool { return s.state() == statePartial }
+
+// IsComplete reports whether s fully identifies one package version.
+func (s Dependency) IsComplete() bool { return s.state() == stateComplete }
+
 // RelPath returns the file system path of the package relative to the cache dir.
+// It returns an empty path unless s is complete.
 func (s Dependency) RelPath() string {
-	if !s.Partial() {
+	if !s.IsComplete() {
 		return ""
 	}
 
@@ -51,19 +87,10 @@ var _ fmt.Stringer = Dependency{}
 
 // String returns the normalized string form of the package.
 func (s Dependency) String() string {
-	if !s.Partial() {
+	if !s.IsComplete() {
 		return fmt.Sprintf("@%s/%s", s.Namespace, s.Name)
 	}
 
 	return fmt.Sprintf("@%s/%s:%s", s.Namespace, s.Name, s.Version)
 
-}
-
-func (s Dependency) IsValid() bool {
-	return s.Namespace != "" && s.Name != ""
-}
-
-// Partial checks if s has all fields or not.
-func (s Dependency) Partial() bool {
-	return !s.IsValid() || s.Version == ""
 }

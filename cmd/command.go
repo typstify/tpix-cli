@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -170,16 +169,7 @@ func getPkgCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgSpec := args[0]
 
-			cfg, err := cm.Load()
-			if err != nil {
-				return err
-			}
-			cacheDir := cfg.TypstCachePkgPath
-			if cacheDir == "" {
-				return fmt.Errorf("typst cache directory not configured")
-			}
-
-			_, err = sdk.DownloadPackage(pkgSpec, cacheDir, noDeps)
+			_, err := sdk.DownloadPackage(pkgSpec, noDeps)
 			return err
 		},
 	}
@@ -203,22 +193,13 @@ along with its transitive dependencies.
 Use --dry-run to see what would be fetched without downloading anything.`,
 		Args: cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := cm.Load()
-			if err != nil {
-				return err
-			}
-			cacheDir := cfg.TypstCachePkgPath
-			if cacheDir == "" {
-				return fmt.Errorf("typst cache directory not configured")
-			}
-
 			// Scan current directory for .typ imports
 			cwd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
-			return sdk.DownloadProjectDependencies(cwd, cacheDir, dryRun)
+			return sdk.DownloadProjectDependencies(cwd, dryRun)
 		},
 	}
 
@@ -245,43 +226,18 @@ func listCachedCmd() *cobra.Command {
 				return fmt.Errorf("typst cache directory not configured")
 			}
 
-			entries, err := os.ReadDir(cacheDir)
+			pkgs, err := pkgCache.List(nil)
 			if err != nil {
-				return fmt.Errorf("failed to read cache directory: %w", err)
+				return err
 			}
 
-			var count int
-			fmt.Printf("Cached packages in %s:\n\n", cacheDir)
+			cmdReporter(fmt.Sprintf("Cached packages in %s:\n\n", cacheDir))
 
-			for _, namespace := range entries {
-				if !namespace.IsDir() {
-					continue
-				}
-				namespacePath := filepath.Join(cacheDir, namespace.Name())
-				pkgs, err := os.ReadDir(namespacePath)
-				if err != nil {
-					continue
-				}
-				for _, pkg := range pkgs {
-					if !pkg.IsDir() {
-						continue
-					}
-					pkgPath := filepath.Join(namespacePath, pkg.Name())
-					versions, err := os.ReadDir(pkgPath)
-					if err != nil {
-						continue
-					}
-					for _, version := range versions {
-						if !version.IsDir() {
-							continue
-						}
-						count++
-						fmt.Printf("@%s/%s:%s\n", namespace.Name(), pkg.Name(), version.Name())
-					}
-				}
+			for _, pkg := range pkgs {
+				cmdReporter(fmt.Sprintf("%s\n", pkg.String()))
 			}
 
-			fmt.Printf("\nTotal: %d packages\n", count)
+			fmt.Printf("\nTotal: %d packages\n", len(pkgs))
 
 			return nil
 		},
@@ -300,36 +256,13 @@ func removeCachedCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgSpec := deps.ParseDependency(args[0])
 
-			if pkgSpec.Partial() {
+			if !pkgSpec.IsComplete() {
 				return fmt.Errorf("invalid package spec: use format @namespace/name:version")
 			}
 
-			cfg, err := cm.Load()
+			err := pkgCache.Remove(pkgSpec)
 			if err != nil {
-				return fmt.Errorf("typst cache directory not configured")
-			}
-
-			cacheDir := cfg.TypstCachePkgPath
-			if cacheDir == "" {
-				return fmt.Errorf("typst cache directory not configured")
-			}
-
-			pkgDir := filepath.Join(cacheDir, pkgSpec.RelPath())
-
-			// Check if the package exists
-			info, err := os.Stat(pkgDir)
-			if err != nil {
-				if os.IsNotExist(err) {
-					return fmt.Errorf("package %s not found in cache", pkgSpec)
-				}
-				return fmt.Errorf("failed to check package: %v", err)
-			}
-			if !info.IsDir() {
-				return fmt.Errorf("package %s is not a directory", pkgSpec)
-			}
-
-			if err := os.RemoveAll(pkgDir); err != nil {
-				return fmt.Errorf("failed to remove package: %v", err)
+				return err
 			}
 
 			fmt.Printf("Removed %s from cache\n", pkgSpec)
@@ -410,7 +343,7 @@ Files and directories can be excluded using the --exclude flag or the exclude fi
 				return err
 			}
 
-			fmt.Printf("Package created: %s\n", finalPath)
+			cmdReporter(fmt.Sprintf("Package created: %s\n", finalPath))
 			return nil
 		},
 	}

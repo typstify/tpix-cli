@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/typstify/tpix-cli"
 	"github.com/typstify/tpix-cli/api"
+	"github.com/typstify/tpix-cli/storage"
 )
 
 var (
@@ -12,8 +13,9 @@ var (
 		Short: "A tpix command line client used to manage Typst packages",
 	}
 
-	cm  *CliConfigManager
-	sdk *tpix.TpixSdk
+	cm       *CliConfigManager
+	sdk      *tpix.TpixSdk
+	pkgCache storage.PackageStore
 )
 
 func main() {
@@ -24,11 +26,15 @@ func main() {
 		panic(err)
 	}
 
-	if cfg.ApiKey != "" {
-		httpClient := api.NewHttpClient(cm)
-		sdk = tpix.NewTpixSdk(httpClient)
-		sdk.WithReporter(cmdReporter)
+	store, err := storage.NewFsPackageStore(cfg.TypstCachePkgPath)
+	if err != nil {
+		panic(err)
 	}
+	pkgCache = store
+
+	httpClient := api.NewHttpClient(cm)
+	sdk = tpix.NewTpixSdk(httpClient, pkgCache)
+	sdk.WithReporter(cmdReporter)
 
 	//rootCmd.PersistentFlags().StringVar(&tpixServer, "server", tpixServer, "TPIX server URL")
 
