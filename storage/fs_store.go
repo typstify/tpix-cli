@@ -14,8 +14,7 @@ import (
 )
 
 var (
-	_ PackageStore = (*FsPackageStore)(nil)
-	_ ContentStore = (*FsPackageStore)(nil)
+	_ Store = (*FsPackageStore)(nil)
 )
 
 type FsPackageStore struct {
