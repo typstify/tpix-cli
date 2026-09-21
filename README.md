@@ -127,7 +127,21 @@ tpix list
 tpix remove @namespace/package-name:1.0.0
 ```
 
-### Create Package
+### Create & Bundle Package
+
+
+Create a Package or Template skeleton.
+
+```bash
+# create a template
+tpix new -d ~/work -t -n my-namespace my-template
+
+# create a package
+tpix new -d ~/work  -n my-namespace my-package
+
+```
+
+Create a package bundle from a package directory.
 
 ```bash
 # Create package from directory
@@ -160,7 +174,7 @@ You can also specify excluded files in the manifest:
 exclude = [".git", "*.test", "node_modules/"]
 ```
 
-For more information on how to create a package, please refer to docs in https://github.com/typst/packages/tree/main/docs.
+For more information on how to create a package, please refer to docs in https://github.com/typst/packages/tree/main/docs & https://tpix.typstify.com/docs/package.
 
 ### Upload Package
 
