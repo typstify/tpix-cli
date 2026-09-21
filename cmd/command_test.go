@@ -22,14 +22,6 @@ func withStore(t *testing.T, store *storage.FsPackageStore) {
 	t.Cleanup(func() { pkgCache = orig })
 }
 
-func withSilentReporter(t *testing.T) {
-	t.Helper()
-
-	orig := cmdReporter
-	cmdReporter = func(string) {}
-	t.Cleanup(func() { cmdReporter = orig })
-}
-
 func TestRemoveCachedCmdExisting(t *testing.T) {
 	dir := t.TempDir()
 	store, err := storage.NewFsPackageStore(dir)
@@ -37,7 +29,6 @@ func TestRemoveCachedCmdExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 	withStore(t, store)
-	withSilentReporter(t)
 
 	spec := deps.Dependency{Namespace: "preview", Name: "cetz", Version: "0.3.0"}
 	if err := os.MkdirAll(filepath.Join(dir, "preview", "cetz", "0.3.0"), 0o755); err != nil {
@@ -65,7 +56,6 @@ func TestRemoveCachedCmdMissingReturnsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	withStore(t, store)
-	withSilentReporter(t)
 
 	cmd := removeCachedCmd()
 	cmd.SetArgs([]string{"preview/nope:1.0.0"})
@@ -84,7 +74,6 @@ func TestRemoveCachedCmdInvalidSpecReturnsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	withStore(t, store)
-	withSilentReporter(t)
 
 	cmd := removeCachedCmd()
 	cmd.SetArgs([]string{"foo"})

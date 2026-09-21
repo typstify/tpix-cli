@@ -37,9 +37,31 @@ func (t *TpixSdk) WithReporter(reporter ReportFunc) {
 	t.reporter = reporter
 }
 
+// ResolvedPackage is a package that was processed during a fetch operation,
+// together with whether it was already present in the local cache.
+type ResolvedPackage struct {
+	Package deps.Dependency
+	Cached  bool
+}
+
+// DirectDependency is a direct import discovered while scanning a project.
+type DirectDependency struct {
+	Package deps.Dependency
+	Cached  bool
+}
+
+// PullResult is the outcome of DownloadProjectDependencies.
+type PullResult struct {
+	ProjectDir string
+	DryRun     bool
+	Direct     []DirectDependency
+	Packages   []ResolvedPackage
+}
+
 // fetchWithDeps downloads a package and its transitive dependencies.
-// visited tracks already-processed packages to prevent infinite loops.
-func (t *TpixSdk) fetchWithDeps(pkg deps.Dependency, visited *[]deps.Dependency, noDeps bool) error {
+// visited tracks already-processed packages to prevent infinite loops, while
+// resolved records every processed package together with its cache status.
+func (t *TpixSdk) fetchWithDeps(pkg deps.Dependency, visited *[]deps.Dependency, resolved *[]ResolvedPackage, noDeps bool) error {
 	if slices.Contains(*visited, pkg) {
 		return nil
 	}
@@ -50,6 +72,8 @@ func (t *TpixSdk) fetchWithDeps(pkg deps.Dependency, visited *[]deps.Dependency,
 	if err != nil {
 		return err
 	}
+
+	*resolved = append(*resolved, ResolvedPackage{Package: pkg, Cached: isCached})
 
 	if isCached {
 		if t.reporter != nil {
@@ -82,7 +106,7 @@ func (t *TpixSdk) fetchWithDeps(pkg deps.Dependency, visited *[]deps.Dependency,
 			Name:      dep.Name,
 			Version:   dep.Version,
 		}
-		if err := t.fetchWithDeps(depSpec, visited, false); err != nil {
+		if err := t.fetchWithDeps(depSpec, visited, resolved, false); err != nil {
 			return err
 		}
 	}
@@ -99,13 +123,14 @@ func (t *TpixSdk) SearchPackages(namespace string, query string, kind string, ca
 	return t.client.SearchPackages(query, namespace, kind, category, sort, limit)
 }
 
-// DownloadPackage download Typst packages from TPIX server and returns downloaded package spec list.
+// DownloadPackage download Typst packages from TPIX server and returns the
+// resolved package list, each tagged with whether it was already cached.
 //
 // pkgSpec should follow the pattern:  @namespace/name:version. Refer to [deps.ParseDependency] to know details.
 // If noDeps is true, it will skip fetching transitive dependencies.
 //
-// The first item of returned slice will always be the pkgSpec.
-func (t *TpixSdk) DownloadPackage(pkgSpec string, noDeps bool) ([]deps.Dependency, error) {
+// The first item of the returned slice will always be the pkgSpec.
+func (t *TpixSdk) DownloadPackage(pkgSpec string, noDeps bool) ([]ResolvedPackage, error) {
 	// Parse namespace/name:version
 	spec := deps.ParseDependency(pkgSpec)
 
@@ -134,21 +159,22 @@ func (t *TpixSdk) DownloadPackage(pkgSpec string, noDeps bool) ([]deps.Dependenc
 	}
 
 	var visited []deps.Dependency
-	if err := t.fetchWithDeps(spec, &visited, noDeps); err != nil {
+	var resolved []ResolvedPackage
+	if err := t.fetchWithDeps(spec, &visited, &resolved, noDeps); err != nil {
 		return nil, err
 	}
 
 	if t.reporter != nil {
-		t.reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(visited)))
+		t.reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(resolved)))
 	}
 
-	return visited, nil
+	return resolved, nil
 }
 
-func (t *TpixSdk) DownloadProjectDependencies(projectDir string, dryRun bool) error {
+func (t *TpixSdk) DownloadProjectDependencies(projectDir string, dryRun bool) (*PullResult, error) {
 	// Scan project directory for .typ imports
 	if projectDir == "" {
-		return fmt.Errorf("invalid working directory: %s", projectDir)
+		return nil, fmt.Errorf("invalid working directory: %s", projectDir)
 	}
 
 	if t.reporter != nil {
@@ -157,14 +183,31 @@ func (t *TpixSdk) DownloadProjectDependencies(projectDir string, dryRun bool) er
 
 	discovered, err := deps.ExtractFromDirectory(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to scan for imports: %w", err)
+		return nil, fmt.Errorf("failed to scan for imports: %w", err)
+	}
+
+	result := &PullResult{ProjectDir: projectDir, DryRun: dryRun}
+
+	// Resolve the cache status of every direct import at scan time.
+	for _, dep := range discovered {
+		depSpec := deps.Dependency{
+			Namespace: dep.Namespace,
+			Name:      dep.Name,
+			Version:   dep.Version,
+		}
+
+		cached, err := t.store.Has(depSpec)
+		if err != nil {
+			return nil, err
+		}
+		result.Direct = append(result.Direct, DirectDependency{Package: depSpec, Cached: cached})
 	}
 
 	if len(discovered) == 0 {
 		if t.reporter != nil {
 			t.reporter(fmt.Sprintln("No package imports found."))
 		}
-		return nil
+		return result, nil
 	}
 
 	if t.reporter != nil {
@@ -172,47 +215,114 @@ func (t *TpixSdk) DownloadProjectDependencies(projectDir string, dryRun bool) er
 	}
 
 	if dryRun {
-		for _, dep := range discovered {
-			depSpec := deps.Dependency{
-				Namespace: dep.Namespace,
-				Name:      dep.Name,
-				Version:   dep.Version,
-			}
-
-			cached, err := t.store.Has(depSpec)
-			if err != nil {
-				return err
-			}
-
+		for _, d := range result.Direct {
 			status := "missing"
-			if cached {
+			if d.Cached {
 				status = "cached"
 			}
 
 			if t.reporter != nil {
-				t.reporter(fmt.Sprintf("  %s [%s]\n", dep.String(), status))
+				t.reporter(fmt.Sprintf("  %s [%s]\n", d.Package, status))
 			}
 		}
-		return nil
+		return result, nil
 	}
 
-	visited := make([]deps.Dependency, 0)
+	var visited []deps.Dependency
+	var resolved []ResolvedPackage
 	for _, dep := range discovered {
 		depSpec := deps.Dependency{
 			Namespace: dep.Namespace,
 			Name:      dep.Name,
 			Version:   dep.Version,
 		}
-		if err := t.fetchWithDeps(depSpec, &visited, false); err != nil {
-			return err
+		if err := t.fetchWithDeps(depSpec, &visited, &resolved, false); err != nil {
+			return nil, err
 		}
 	}
+	result.Packages = resolved
 
 	if t.reporter != nil {
-		t.reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(visited)))
+		t.reporter(fmt.Sprintf("Done. %d package(s) resolved.\n", len(resolved)))
 	}
 
-	return nil
+	return result, nil
+}
+
+// DependencyNode is a package together with its resolved dependencies.
+type DependencyNode struct {
+	Package  deps.Dependency
+	Cached   bool
+	Children []*DependencyNode
+}
+
+// DependencyGraph is the resolved dependency graph of a package.
+type DependencyGraph struct {
+	Root *DependencyNode
+	// Packages is the flattened, de-duplicated set of all packages in the graph.
+	Packages []ResolvedPackage
+}
+
+// ResolveDependencies resolves the full dependency graph of pkgSpec without
+// downloading any package. Cache status is read from the local store.
+func (t *TpixSdk) ResolveDependencies(pkgSpec string) (*DependencyGraph, error) {
+	spec := deps.ParseDependency(pkgSpec)
+	if !spec.IsValid() {
+		return nil, errors.New("invalid package spec, use format @namespace/name:version")
+	}
+
+	if spec.Version == "" {
+		pkg, err := t.client.FetchPackage(spec.Namespace, spec.Name)
+		if err != nil {
+			return nil, err
+		}
+		if len(pkg.Versions) == 0 {
+			return nil, fmt.Errorf("no versions available for package")
+		}
+		spec.Version = pkg.Versions[0].Version
+	}
+
+	seen := make(map[deps.Dependency]bool)
+	var flat []ResolvedPackage
+
+	cachedStatus := func(pkg deps.Dependency) bool {
+		if t.store == nil {
+			return false
+		}
+		cached, err := t.store.Has(pkg)
+		return err == nil && cached
+	}
+
+	var walk func(pkg deps.Dependency) *DependencyNode
+	walk = func(pkg deps.Dependency) *DependencyNode {
+		node := &DependencyNode{Package: pkg, Cached: cachedStatus(pkg)}
+
+		// A package already seen elsewhere in the graph becomes a leaf, which
+		// both de-duplicates shared dependencies and prevents infinite cycles.
+		if seen[pkg] {
+			return node
+		}
+		seen[pkg] = true
+		flat = append(flat, ResolvedPackage{Package: pkg, Cached: node.Cached})
+
+		depInfos, err := t.client.FetchDependencies(pkg.Namespace, pkg.Name, pkg.Version)
+		if err != nil {
+			// Non-fatal: the server may not have dependency data for older packages.
+			return node
+		}
+
+		for _, dep := range depInfos {
+			node.Children = append(node.Children, walk(deps.Dependency{
+				Namespace: dep.Namespace,
+				Name:      dep.Name,
+				Version:   dep.Version,
+			}))
+		}
+		return node
+	}
+
+	root := walk(spec)
+	return &DependencyGraph{Root: root, Packages: flat}, nil
 }
 
 func (t *TpixSdk) QueryPackage(pkgSpec string) (*api.PackageResponse, error) {
@@ -264,14 +374,14 @@ func (t *TpixSdk) BundlePackage(srcDir string, outputFile string, excludedFiles 
 	return outputFile, nil
 }
 
-func (t *TpixSdk) PushPackage(packagePath string, namespace string) error {
+func (t *TpixSdk) PushPackage(packagePath string, namespace string) (*api.UploadResponse, error) {
 	// Check if file exists
 	info, err := os.Stat(packagePath)
 	if err != nil {
-		return fmt.Errorf("failed to access package: %w", err)
+		return nil, fmt.Errorf("failed to access package: %w", err)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("%s is a directory, not a package file", packagePath)
+		return nil, fmt.Errorf("%s is a directory, not a package file", packagePath)
 	}
 
 	if t.reporter != nil {
@@ -280,7 +390,7 @@ func (t *TpixSdk) PushPackage(packagePath string, namespace string) error {
 
 	resp, err := t.client.UploadPackage(packagePath, namespace)
 	if err != nil {
-		return fmt.Errorf("upload failed: %w", err)
+		return nil, fmt.Errorf("upload failed: %w", err)
 	}
 
 	if resp.SHA256 != "" {
@@ -297,7 +407,7 @@ func (t *TpixSdk) PushPackage(packagePath string, namespace string) error {
 		}
 	}
 
-	return nil
+	return resp, nil
 }
 
 // GetUserProfile queries the user profile from TPIX server.

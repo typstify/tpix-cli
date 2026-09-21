@@ -135,7 +135,7 @@ func TestDownloadProjectDependenciesDryRun(t *testing.T) {
 
 	// Directory with no imports should succeed without network.
 	dir := t.TempDir()
-	if err := sdk.DownloadProjectDependencies(dir, false); err != nil {
+	if _, err := sdk.DownloadProjectDependencies(dir, false); err != nil {
 		t.Fatalf("DownloadProjectDependencies() error = %v", err)
 	}
 
@@ -145,7 +145,7 @@ func TestDownloadProjectDependenciesDryRun(t *testing.T) {
 	})
 	var msgs []string
 	sdk.WithReporter(func(m string) { msgs = append(msgs, m) })
-	if err := sdk.DownloadProjectDependencies(dir, true); err != nil {
+	if _, err := sdk.DownloadProjectDependencies(dir, true); err != nil {
 		t.Fatalf("DownloadProjectDependencies() dry run error = %v", err)
 	}
 	found := false
@@ -246,8 +246,8 @@ func TestDownloadPackageResolvesLatestVersion(t *testing.T) {
 	if len(specs) != 1 {
 		t.Fatalf("resolved %d packages, want 1: %+v", len(specs), specs)
 	}
-	if specs[0].Version != "0.3.0" {
-		t.Errorf("resolved version = %q, want 0.3.0", specs[0].Version)
+	if specs[0].Package.Version != "0.3.0" {
+		t.Errorf("resolved version = %q, want 0.3.0", specs[0].Package.Version)
 	}
 }
 
@@ -410,5 +410,48 @@ func TestZoteroExportFlow(t *testing.T) {
 
 	if err := sdk.DeleteZoteroExport(exportID); err != nil {
 		t.Fatalf("DeleteZoteroExport() error = %v", err)
+	}
+}
+
+func TestResolveDependencies(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/packages/preview/cetz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(api.PackageResponse{
+			Name:      "cetz",
+			Namespace: "preview",
+			Versions: []api.PackageVersionInfo{
+				{Version: "0.3.0"},
+				{Version: "0.2.0"},
+			},
+		})
+	})
+	mux.HandleFunc("/api/v1/packages/preview/cetz/0.3.0/dependencies", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(api.DependenciesResponse{
+			Package:      "cetz",
+			Version:      "0.3.0",
+			Dependencies: []api.DependencyInfo{{Namespace: "preview", Name: "tablex", Version: "0.0.6"}},
+		})
+	})
+	mux.HandleFunc("/api/v1/packages/preview/tablex/0.0.6/dependencies", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(api.DependenciesResponse{Package: "tablex", Version: "0.0.6"})
+	})
+
+	sdk := newTestSdk(t, mux)
+	graph, err := sdk.ResolveDependencies("@preview/cetz")
+	if err != nil {
+		t.Fatalf("ResolveDependencies() error = %v", err)
+	}
+
+	if graph.Root.Package.Version != "0.3.0" {
+		t.Errorf("root version = %q, want 0.3.0", graph.Root.Package.Version)
+	}
+	if len(graph.Root.Children) != 1 || graph.Root.Children[0].Package.Name != "tablex" {
+		t.Fatalf("unexpected children: %+v", graph.Root.Children)
+	}
+	if len(graph.Packages) != 2 {
+		t.Errorf("flat packages = %d, want 2", len(graph.Packages))
 	}
 }

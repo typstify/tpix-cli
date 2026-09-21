@@ -56,6 +56,14 @@ tpix login
 
 Login using api key issued by the TPIX server.
 
+```bash
+# Show the authenticated user
+tpix whoami
+
+# Remove the stored API key
+tpix logout
+```
+
 ### Configuration
 
 ```bash
@@ -115,6 +123,9 @@ tpix pull --dry-run
 ```bash
 # View package details
 tpix info @namespace/package-name
+
+# Show the full transitive dependency tree (no downloads)
+tpix deps @namespace/package-name
 ```
 
 ### Local Cache
@@ -207,3 +218,15 @@ Package specifications use the format `@namespace/name:version`:
 
 - `@user/chart` - latest version from user's namespace
 - `@user/chart:1.0.0` - specific version
+
+### Structured output
+
+Pass the global `--json` flag to get a single structured result document on stdout:
+
+```bash
+tpix search cetz --json
+tpix get @preview/cetz --json
+```
+
+Progress output goes to stderr, so stdout is always a single JSON document.
+See [docs/json-output.md](docs/json-output.md) for the full schema.

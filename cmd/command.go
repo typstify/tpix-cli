@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -13,10 +14,6 @@ import (
 	"github.com/typstify/tpix-cli/deps"
 	"github.com/typstify/tpix-cli/version"
 )
-
-var cmdReporter = func(msg string) {
-	fmt.Print(msg)
-}
 
 func loginCmd() *cobra.Command {
 	var apiKey string
@@ -39,13 +36,78 @@ func loginCmd() *cobra.Command {
 			cfg.ApiKey = key
 
 			cm.Save(cfg)
-			cmdReporter("Success! API key saved.\n")
+			if currentFormat() == formatText {
+				fmt.Fprint(cmd.OutOrStdout(), "Success! API key saved.\n")
+			}
 
-			return nil
+			return emitResult(cmd, loginResult{Success: true})
 		},
 	}
 
 	cmd.Flags().StringVarP(&apiKey, "apiKey", "k", "", " API key issued by https://tpix.typstify.com")
+
+	return cmd
+}
+
+// logoutCmd removes the stored API key.
+func logoutCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "logout",
+		Short: "Remove the stored API key",
+		Long:  "Sign out of the TPIX server by removing the locally stored API key",
+		Args:  cobra.ExactArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := cm.Load()
+			if err != nil {
+				return err
+			}
+
+			cfg.ApiKey = ""
+			if err := cm.Save(cfg); err != nil {
+				return fmt.Errorf("failed to save config: %w", err)
+			}
+
+			if currentFormat() != formatText {
+				return emitResult(cmd, logoutResult{Success: true})
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), "Logged out.")
+			return nil
+		},
+	}
+
+	return cmd
+}
+
+// whoamiCmd shows the profile of the authenticated user.
+func whoamiCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "whoami",
+		Short: "Show the authenticated TPIX user",
+		Long:  "Show the TPIX user profile associated with the configured API key",
+		Args:  cobra.ExactArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profile, err := sdk.GetUserProfile()
+			if err != nil {
+				return err
+			}
+
+			if currentFormat() != formatText {
+				return emitResult(cmd, profile)
+			}
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Username: %s\n", profile.Username)
+			fmt.Fprintf(out, "Email: %s\n", profile.Email)
+			if len(profile.Namespaces) > 0 {
+				fmt.Fprintf(out, "Namespaces:\n")
+				for _, ns := range profile.Namespaces {
+					fmt.Fprintf(out, "  - %s (%s)\n", ns.Name, ns.Permission)
+				}
+			}
+			return nil
+		},
+	}
 
 	return cmd
 }
@@ -83,9 +145,11 @@ func newPackageCmd() *cobra.Command {
 				return fmt.Errorf("failed to create package: %w", err)
 			}
 
-			cmdReporter(fmt.Sprintf("Success! Package dir: %s\n", pkgDir))
+			if currentFormat() == formatText {
+				fmt.Fprintf(cmd.OutOrStdout(), "Success! Package dir: %s\n", pkgDir)
+			}
 
-			return nil
+			return emitResult(cmd, newPackageResult{PackageDir: pkgDir})
 		},
 	}
 
@@ -120,24 +184,29 @@ func searchPkgCmd() *cobra.Command {
 				return fmt.Errorf("failed to search packages: %w", err)
 			}
 
-			fmt.Printf("Found %d results for '%s':\n\n", result.Count, query)
+			if currentFormat() != formatText {
+				return emitResult(cmd, result)
+			}
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Found %d results for '%s':\n\n", result.Count, query)
 			for _, r := range result.Results {
-				cmdReporter(fmt.Sprintf("@%s/%s - %s\n", r.Namespace, r.Name, r.Description))
+				fmt.Fprintf(out, "@%s/%s - %s\n", r.Namespace, r.Name, r.Description)
 				if verbose {
-					cmdReporter(fmt.Sprintf("  template: %t\n", r.IsTemplate))
-					cmdReporter(fmt.Sprintf("  version: %s\n", r.LatestVersion))
+					fmt.Fprintf(out, "  template: %t\n", r.IsTemplate)
+					fmt.Fprintf(out, "  version: %s\n", r.LatestVersion)
 					if len(r.Authors) > 0 {
-						cmdReporter(fmt.Sprintf("  authors: %s\n", strings.Join(r.Authors, ", ")))
+						fmt.Fprintf(out, "  authors: %s\n", strings.Join(r.Authors, ", "))
 					}
-					cmdReporter(fmt.Sprintf("  published at: %s\n", r.PublishedAt.Format(time.DateOnly)))
+					fmt.Fprintf(out, "  published at: %s\n", r.PublishedAt.Format(time.DateOnly))
 					if len(r.Categories) > 0 {
-						cmdReporter(fmt.Sprintf("  categories: %s\n", strings.Join(r.Categories, ", ")))
+						fmt.Fprintf(out, "  categories: %s\n", strings.Join(r.Categories, ", "))
 					}
 					if len(r.Disciplines) > 0 {
-						cmdReporter(fmt.Sprintf("  disciplines: %s\n", strings.Join(r.Disciplines, ", ")))
+						fmt.Fprintf(out, "  disciplines: %s\n", strings.Join(r.Disciplines, ", "))
 					}
 					if r.License != "" {
-						cmdReporter(fmt.Sprintf("  license: %s\n", r.License))
+						fmt.Fprintf(out, "  license: %s\n", r.License)
 					}
 				}
 			}
@@ -167,8 +236,24 @@ func getPkgCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgSpec := args[0]
 
-			_, err := sdk.DownloadPackage(pkgSpec, noDeps)
-			return err
+			pkgs, err := sdk.DownloadPackage(pkgSpec, noDeps)
+			if err != nil {
+				return err
+			}
+			if currentFormat() == formatText {
+				return nil
+			}
+
+			items := make([]resolvedPackageOutput, 0, len(pkgs))
+			for _, p := range pkgs {
+				items = append(items, resolvedPackageOutput{
+					Namespace: p.Package.Namespace,
+					Name:      p.Package.Name,
+					Version:   p.Package.Version,
+					Cached:    p.Cached,
+				})
+			}
+			return emitResult(cmd, getResult{Requested: pkgSpec, Packages: items, Resolved: len(items)})
 		},
 	}
 
@@ -197,13 +282,128 @@ Use --dry-run to see what would be fetched without downloading anything.`,
 				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
-			return sdk.DownloadProjectDependencies(cwd, dryRun)
+			result, err := sdk.DownloadProjectDependencies(cwd, dryRun)
+			if err != nil {
+				return err
+			}
+			if currentFormat() == formatText {
+				return nil
+			}
+
+			direct := make([]resolvedPackageOutput, 0, len(result.Direct))
+			for _, d := range result.Direct {
+				direct = append(direct, resolvedPackageOutput{
+					Namespace: d.Package.Namespace,
+					Name:      d.Package.Name,
+					Version:   d.Package.Version,
+					Cached:    d.Cached,
+				})
+			}
+			pkgs := make([]resolvedPackageOutput, 0, len(result.Packages))
+			for _, p := range result.Packages {
+				pkgs = append(pkgs, resolvedPackageOutput{
+					Namespace: p.Package.Namespace,
+					Name:      p.Package.Name,
+					Version:   p.Package.Version,
+					Cached:    p.Cached,
+				})
+			}
+
+			return emitResult(cmd, pullResult{
+				ProjectDir: result.ProjectDir,
+				DryRun:     result.DryRun,
+				Direct:     direct,
+				Packages:   pkgs,
+				Resolved:   len(pkgs),
+			})
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be fetched without downloading")
 
 	return cmd
+}
+
+// depsCmd resolves and prints the transitive dependency tree of a package.
+func depsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "deps <namespace/name>",
+		Short: "Show the dependency tree of a package",
+		Long:  "Resolve and print the transitive dependencies of a package without downloading it.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			graph, err := sdk.ResolveDependencies(args[0])
+			if err != nil {
+				return err
+			}
+
+			if currentFormat() != formatText {
+				flat := make([]resolvedPackageOutput, 0, len(graph.Packages))
+				for _, p := range graph.Packages {
+					flat = append(flat, resolvedPackageOutput{
+						Namespace: p.Package.Namespace,
+						Name:      p.Package.Name,
+						Version:   p.Package.Version,
+						Cached:    p.Cached,
+					})
+				}
+				return emitResult(cmd, depsResult{Root: toDependencyNodeOutput(graph.Root), Packages: flat})
+			}
+
+			fmt.Fprint(cmd.OutOrStdout(), formatDependencyTree(graph.Root))
+			return nil
+		},
+	}
+
+	return cmd
+}
+
+func toDependencyNodeOutput(node *cli.DependencyNode) dependencyNodeOutput {
+	out := dependencyNodeOutput{
+		Package: packageOutput{
+			Namespace: node.Package.Namespace,
+			Name:      node.Package.Name,
+			Version:   node.Package.Version,
+		},
+		Cached: node.Cached,
+	}
+	for _, child := range node.Children {
+		out.Children = append(out.Children, toDependencyNodeOutput(child))
+	}
+	return out
+}
+
+func formatDependencyTree(root *cli.DependencyNode) string {
+	status := func(node *cli.DependencyNode) string {
+		if node.Cached {
+			return "cached"
+		}
+		return "missing"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s [%s]\n", root.Package, status(root))
+
+	var walk func(node *cli.DependencyNode, prefix string)
+	walk = func(node *cli.DependencyNode, prefix string) {
+		for i, child := range node.Children {
+			last := i == len(node.Children)-1
+			connector := "├── "
+			if last {
+				connector = "└── "
+			}
+			fmt.Fprintf(&b, "%s%s%s [%s]\n", prefix, connector, child.Package, status(child))
+
+			childPrefix := prefix + "│   "
+			if last {
+				childPrefix = prefix + "    "
+			}
+			walk(child, childPrefix)
+		}
+	}
+	walk(root, "")
+
+	return b.String()
 }
 
 // listCachedCmd lists locally cached/downloaded packages.
@@ -229,13 +429,26 @@ func listCachedCmd() *cobra.Command {
 				return err
 			}
 
-			cmdReporter(fmt.Sprintf("Cached packages in %s:\n\n", cacheDir))
-
-			for _, pkg := range pkgs {
-				cmdReporter(fmt.Sprintf("%s\n", pkg.String()))
+			if currentFormat() != formatText {
+				items := make([]cachedPackage, 0, len(pkgs))
+				for _, p := range pkgs {
+					item := cachedPackage{Namespace: p.Namespace, Name: p.Name, Version: p.Version}
+					if path, err := pkgCache.Path(p); err == nil {
+						item.Path = path
+					}
+					items = append(items, item)
+				}
+				return emitResult(cmd, cachedListResult{CachePath: cacheDir, Packages: items, Total: len(items)})
 			}
 
-			fmt.Printf("\nTotal: %d packages\n", len(pkgs))
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Cached packages in %s:\n\n", cacheDir)
+
+			for _, pkg := range pkgs {
+				fmt.Fprintf(out, "%s\n", pkg.String())
+			}
+
+			fmt.Fprintf(out, "\nTotal: %d packages\n", len(pkgs))
 
 			return nil
 		},
@@ -270,7 +483,15 @@ func removeCachedCmd() *cobra.Command {
 				return err
 			}
 
-			cmdReporter(fmt.Sprintf("Removed %s from cache\n", pkgSpec))
+			if currentFormat() != formatText {
+				return emitResult(cmd, removeResult{Removed: packageOutput{
+					Namespace: pkgSpec.Namespace,
+					Name:      pkgSpec.Name,
+					Version:   pkgSpec.Version,
+				}})
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed %s from cache\n", pkgSpec)
 			return nil
 		},
 	}
@@ -290,6 +511,10 @@ func queryPkgCmd() *cobra.Command {
 			pkg, err := sdk.QueryPackage(pkgSpec)
 			if err != nil {
 				return err
+			}
+
+			if currentFormat() != formatText {
+				return emitResult(cmd, pkg)
 			}
 
 			fmt.Printf("Package: @%s/%s\n\n", pkg.Namespace, pkg.Name)
@@ -348,7 +573,11 @@ Files and directories can be excluded using the --exclude flag or the exclude fi
 				return err
 			}
 
-			cmdReporter(fmt.Sprintf("Package created: %s\n", finalPath))
+			if currentFormat() != formatText {
+				return emitResult(cmd, bundleResult{SourceDir: srcDir, OutputPath: finalPath})
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Package created: %s\n", finalPath)
 			return nil
 		},
 	}
@@ -371,7 +600,23 @@ The package must be a valid Typst package archive created with the bundle comman
 			packagePath := args[0]
 			namespace := args[1]
 
-			return sdk.PushPackage(packagePath, namespace)
+			resp, err := sdk.PushPackage(packagePath, namespace)
+			if err != nil {
+				return err
+			}
+			if currentFormat() == formatText {
+				return nil
+			}
+
+			return emitResult(cmd, pushResult{
+				Namespace: resp.Namespace,
+				Package:   resp.Package,
+				Version:   resp.Version,
+				SHA256:    resp.SHA256,
+				Size:      resp.Size,
+				Success:   resp.SHA256 != "",
+				Report:    resp.ValidateReport,
+			})
 		},
 	}
 
@@ -386,27 +631,39 @@ func versionCmd() *cobra.Command {
 		Long:  "Show the current version of tpix-cli and check for available updates",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Printf("tpix-cli version %s\n", version.FormatedVersion())
-
-			// Check for updates
 			updater := &version.Updater{}
-			hasUpdate, err := updater.Check()
-			if err != nil {
+			hasUpdate, checkErr := updater.Check()
+
+			res := versionResult{Version: version.Version, SchemaVersion: schemaVersion, HasUpdate: hasUpdate}
+			if hasUpdate {
+				if latest, err := updater.Latest(); err == nil {
+					res.Latest = latest.Version
+				}
+			}
+
+			if currentFormat() != formatText {
+				return emitResult(cmd, res)
+			}
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "tpix-cli version %s\n", version.FormatedVersion())
+
+			if checkErr != nil {
 				// Don't fail if update check fails, just warn
-				fmt.Printf("\nWarning: could not check for updates: %v\n", err)
+				fmt.Fprintf(out, "\nWarning: could not check for updates: %v\n", checkErr)
 				return nil
 			}
 
 			if hasUpdate {
 				latest, err := updater.Latest()
 				if err != nil {
-					fmt.Printf("\nWarning: could not get latest version info: %v\n", err)
+					fmt.Fprintf(out, "\nWarning: could not get latest version info: %v\n", err)
 					return nil
 				}
-				fmt.Printf("\nA new version is available: %s\n", latest.Version)
-				fmt.Printf("Run 'tpix update' to upgrade\n")
+				fmt.Fprintf(out, "\nA new version is available: %s\n", latest.Version)
+				fmt.Fprintf(out, "Run 'tpix update' to upgrade\n")
 			} else {
-				fmt.Printf("\nYou are running the latest version.\n")
+				fmt.Fprintf(out, "\nYou are running the latest version.\n")
 			}
 
 			return nil
@@ -424,6 +681,10 @@ func updateCmd() *cobra.Command {
 		Long:  "Download and install the latest version of tpix-cli from GitHub releases",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireTextFormat(cmd, "update"); err != nil {
+				return err
+			}
+
 			fmt.Println("Checking for updates...")
 
 			updater := &version.Updater{}
@@ -493,6 +754,7 @@ If neither is set, the default path is used:
 			if err != nil {
 				return err
 			}
+			previous := cfg.TypstCachePkgPath
 
 			if flagSet {
 				// Flag was explicitly set
@@ -508,7 +770,11 @@ If neither is set, the default path is used:
 						return err
 					}
 
-					fmt.Printf("Cache path reset to: %s\n", effective.TypstCachePkgPath)
+					if currentFormat() != formatText {
+						return emitResult(cmd, cachePathResult{Path: effective.TypstCachePkgPath, Source: cachePathSource(), Previous: previous})
+					}
+
+					fmt.Fprintf(cmd.OutOrStdout(), "Cache path reset to: %s\n", effective.TypstCachePkgPath)
 					return nil
 				}
 
@@ -534,10 +800,14 @@ If neither is set, the default path is used:
 					return err
 				}
 
+				if currentFormat() != formatText {
+					return emitResult(cmd, cachePathResult{Path: effective.TypstCachePkgPath, Source: cachePathSource(), Previous: previous})
+				}
+
 				if effective.TypstCachePkgPath != setPath {
-					fmt.Printf("Cache path set to: %s (overridden by %s: %s)\n", setPath, cachePathEnv, effective.TypstCachePkgPath)
+					fmt.Fprintf(cmd.OutOrStdout(), "Cache path set to: %s (overridden by %s: %s)\n", setPath, cachePathEnv, effective.TypstCachePkgPath)
 				} else {
-					fmt.Printf("Cache path set to: %s\n", effective.TypstCachePkgPath)
+					fmt.Fprintf(cmd.OutOrStdout(), "Cache path set to: %s\n", effective.TypstCachePkgPath)
 				}
 				return nil
 			}
@@ -546,7 +816,10 @@ If neither is set, the default path is used:
 			if cacheDir == "" {
 				return fmt.Errorf("cache directory not configured")
 			}
-			fmt.Println(cacheDir)
+			if currentFormat() != formatText {
+				return emitResult(cmd, cachePathResult{Path: cacheDir, Source: cachePathSource()})
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), cacheDir)
 			return nil
 		},
 	}
@@ -584,12 +857,17 @@ func zoteroListCmd() *cobra.Command {
 				return fmt.Errorf("failed to list libraries: %w", err)
 			}
 
+			if currentFormat() != formatText {
+				return emitResult(cmd, zoteroListResult{Libraries: libraries})
+			}
+
+			out := cmd.OutOrStdout()
 			if len(libraries) == 0 {
-				fmt.Println("No accessible Zotero libraries.")
+				fmt.Fprintln(out, "No accessible Zotero libraries.")
 				return nil
 			}
 
-			fmt.Printf("Accessible Zotero libraries:\n\n")
+			fmt.Fprintf(out, "Accessible Zotero libraries:\n\n")
 			for i, lib := range libraries {
 				scope := lib.Namespace
 				if scope == "" {
@@ -597,15 +875,15 @@ func zoteroListCmd() *cobra.Command {
 				} else {
 					scope = "@" + scope
 				}
-				fmt.Printf("%d. %s (%s)\n", i+1, scope, lib.Scope)
-				fmt.Printf("   Library: %s (ID: %d)\n", lib.Library.Name, lib.Library.ID)
+				fmt.Fprintf(out, "%d. %s (%s)\n", i+1, scope, lib.Scope)
+				fmt.Fprintf(out, "   Library: %s (ID: %d)\n", lib.Library.Name, lib.Library.ID)
 				if len(lib.Collections) > 0 {
-					fmt.Printf("   Collections:\n")
+					fmt.Fprintf(out, "   Collections:\n")
 					for _, col := range lib.Collections {
-						fmt.Printf("     - %s\n", col.Name)
+						fmt.Fprintf(out, "     - %s\n", col.Name)
 					}
 				}
-				fmt.Println()
+				fmt.Fprintln(out)
 			}
 
 			return nil
@@ -632,6 +910,11 @@ Interactive mode: run without flags to select library and collection.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var targetLib *cli.ZoteroLibrary
 			var targetCol string
+
+			// Machine mode cannot prompt, so require an explicit library.
+			if currentFormat() != formatText && libraryID <= 0 {
+				return usageErrorf("--library is required in --json mode")
+			}
 
 			// If library ID provided, use it directly
 			if libraryID > 0 {
@@ -721,21 +1004,28 @@ Interactive mode: run without flags to select library and collection.`,
 				return fmt.Errorf("failed to create export: %w", err)
 			}
 
-			// Fetch and write output
-			var writer interface{ Write([]byte) (int, error) }
+			// Fetch output. When no output file is requested we buffer the content
+			// so machine mode can return it as a JSON field instead of writing it
+			// to stdout.
+			var content []byte
 			if output != "" {
 				f, err := os.Create(output)
 				if err != nil {
 					return fmt.Errorf("failed to create output file: %w", err)
 				}
-				defer f.Close()
-				writer = f
+				if err := sdk.FetchZoteroExport(exportID, f); err != nil {
+					f.Close()
+					return fmt.Errorf("failed to fetch export: %w", err)
+				}
+				if err := f.Close(); err != nil {
+					return fmt.Errorf("failed to write output file: %w", err)
+				}
 			} else {
-				writer = os.Stdout
-			}
-
-			if err := sdk.FetchZoteroExport(exportID, writer); err != nil {
-				return fmt.Errorf("failed to fetch export: %w", err)
+				var buf bytes.Buffer
+				if err := sdk.FetchZoteroExport(exportID, &buf); err != nil {
+					return fmt.Errorf("failed to fetch export: %w", err)
+				}
+				content = buf.Bytes()
 			}
 
 			// Clean up the export target (treat as ephemeral in tpix-cli)
@@ -744,6 +1034,19 @@ Interactive mode: run without flags to select library and collection.`,
 				fmt.Fprintf(os.Stderr, "Warning: failed to clean up export: %v\n", err)
 			}
 
+			if currentFormat() != formatText {
+				res := zoteroExportResult{ExportID: exportID, Format: format, OutputPath: output}
+				if output == "" {
+					res.Content = string(content)
+				}
+				return emitResult(cmd, res)
+			}
+
+			if output == "" {
+				if _, err := cmd.OutOrStdout().Write(content); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
@@ -768,6 +1071,10 @@ func zoteroDeleteCmd() *cobra.Command {
 
 			if err := sdk.DeleteZoteroExport(exportID); err != nil {
 				return fmt.Errorf("failed to delete export: %w", err)
+			}
+
+			if currentFormat() != formatText {
+				return emitResult(cmd, zoteroDeleteResult{Deleted: exportID})
 			}
 
 			return nil

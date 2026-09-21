@@ -27,27 +27,34 @@ func main() {
 	cfg, err := cm.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitAuth)
 	}
 
 	store, err := storage.NewFsPackageStore(cfg.TypstCachePkgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitGeneric)
 	}
 	pkgCache = store
 
 	httpClient := api.NewHttpClient(cm)
 	sdk = tpix.NewTpixSdk(httpClient, pkgCache)
-	sdk.WithReporter(cmdReporter)
+
+	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Emit a single JSON result document on stdout")
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		return setupOutput(cmd)
+	}
 
 	//rootCmd.PersistentFlags().StringVar(&tpixServer, "server", tpixServer, "TPIX server URL")
 
 	rootCmd.AddCommand(loginCmd())
+	rootCmd.AddCommand(logoutCmd())
+	rootCmd.AddCommand(whoamiCmd())
 	rootCmd.AddCommand(newPackageCmd())
 	rootCmd.AddCommand(searchPkgCmd())
 	rootCmd.AddCommand(getPkgCmd())
 	rootCmd.AddCommand(pullCmd())
+	rootCmd.AddCommand(depsCmd())
 	rootCmd.AddCommand(queryPkgCmd())
 	rootCmd.AddCommand(listCachedCmd())
 	rootCmd.AddCommand(removeCachedCmd())
@@ -58,7 +65,9 @@ func main() {
 	rootCmd.AddCommand(cachePathCmd())
 	rootCmd.AddCommand(zoteroCmd())
 
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+	cmd, err := rootCmd.ExecuteC()
+	if err != nil {
+		emitError(cmd, err)
+		os.Exit(exitCodeFor(err))
 	}
 }
