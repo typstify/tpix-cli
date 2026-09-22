@@ -41,7 +41,7 @@ release: clean
 		os=$${platform%/*}; \
 		arch=$${platform#*/}; \
 		output_name=$(BINARY_NAME); \
-		[ $$os = "windows" ] && output_name+=".exe"; \
+		case "$$os" in windows) output_name="$$output_name.exe";; esac; \
 		\
 		echo "Building for $$os/$$arch..."; \
 		GOOS=$$os GOARCH=$$arch go build -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$$output_name ./cmd; \
